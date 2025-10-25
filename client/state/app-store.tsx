@@ -81,11 +81,15 @@ function reducer(state: State, action: Action): State {
       const resourcesUsed = req.resourcesRequired ?? 1;
       const availableResources = Math.max(0, state.availableResources - resourcesUsed);
       const peopleNeedingHelp = Math.max(0, state.peopleNeedingHelp - (req.people ?? 1));
-      const requests = state.requests.map((r) => (r.id === req.id ? { ...r, status: "fulfilled" } : r));
+      const requests = state.requests.map((r) =>
+        r.id === req.id ? { ...r, status: "fulfilled" as RequestStatus } : r,
+      );
       return { ...state, requests, availableResources, peopleNeedingHelp };
     }
     case "REJECT_REQUEST": {
-      const requests = state.requests.map((r) => (r.id === action.id ? { ...r, status: "rejected" } : r));
+      const requests = state.requests.map((r) =>
+        r.id === action.id ? { ...r, status: "rejected" as RequestStatus } : r,
+      );
       return { ...state, requests };
     }
     case "ADD_NOTIFICATION": {

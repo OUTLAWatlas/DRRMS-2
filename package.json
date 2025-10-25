@@ -17,13 +17,22 @@
     "build:server": "vite build --config vite.config.server.ts",
     "start": "node dist/server/node-build.mjs",
     "test": "vitest --run",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio",
+  "db:seed": "tsx server/db/seed.ts",
     "format.fix": "prettier --write .",
     "typecheck": "tsc"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "better-sqlite3": "^12.4.1",
     "dotenv": "^17.2.1",
+    "drizzle-orm": "^0.44.7",
     "express": "^5.1.0",
-    "zod": "^3.25.76"
+    "jsonwebtoken": "^9.0.2",
+    "zod": "^3.25.76",
+    "sql.js": "^1.10.3"
   },
   "devDependencies": {
     "@hookform/resolvers": "^5.2.1",
@@ -97,7 +106,11 @@
     "typescript": "^5.9.2",
     "vaul": "^1.1.2",
     "vite": "^7.1.2",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "drizzle-kit": "^0.27.0"
   },
+  "trustedDependencies": [
+    "better-sqlite3"
+  ],
   "packageManager": "pnpm@10.14.0+sha512.ad27a79641b49c3e481a16a805baa71817a04bbe06a38d17e60e2eaee83f6a146c6a688125f5792e48dd5ba30e7da52a5cda4c3992b9ccf333f9ce223af84748"
 }
