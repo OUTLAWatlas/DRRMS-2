@@ -3,10 +3,18 @@ import { useAppStore } from "@/state/app-store";
 import { useMemo, useState } from "react";
 
 export default function RescuePortal() {
-  const { state, dispatch } = useAppStore();
-  const [resourceInput, setResourceInput] = useState(state.availableResources);
+  const requests = useAppStore((state) => state.requests);
+  const notifications = useAppStore((state) => state.notifications);
+  const availableResources = useAppStore((state) => state.availableResources);
+  const peopleNeedingHelp = useAppStore((state) => state.peopleNeedingHelp);
+  const fulfillRequest = useAppStore((state) => state.fulfillRequest);
+  const rejectRequest = useAppStore((state) => state.rejectRequest);
+  const updateAvailableResources = useAppStore((state) => state.updateAvailableResources);
+  const dispatchFromWarehouse = useAppStore((state) => state.dispatchFromWarehouse);
+  
+  const [resourceInput, setResourceInput] = useState(availableResources);
 
-  const pending = useMemo(() => state.requests.filter((r) => r.status === "pending"), [state.requests]);
+  const pending = useMemo(() => requests.filter((r) => r.status === "pending"), [requests]);
 
   return (
     <div>
@@ -29,8 +37,8 @@ export default function RescuePortal() {
             <section className="rounded-xl border bg-card p-6">
               <h2 className="text-xl font-bold mb-4">Latest Notifications</h2>
               <ul className="space-y-2 text-sm max-h-48 overflow-auto">
-                {state.notifications.length === 0 && <li className="text-muted-foreground">No notifications yet.</li>}
-                {state.notifications.map((n) => (
+                {notifications.length === 0 && <li className="text-muted-foreground">No notifications yet.</li>}
+                {notifications.map((n) => (
                   <li key={n.id} className="flex justify-between border-b pb-2">
                     <span>{n.message}</span>
                     <span className="text-muted-foreground">{new Date(n.createdAt).toLocaleTimeString()}</span>
@@ -52,8 +60,8 @@ export default function RescuePortal() {
                   </div>
                   <div className="mt-2 text-sm">{pending[0].what}</div>
                   <div className="mt-3 flex gap-2">
-                    <Button onClick={() => dispatch({ type: "FULFILL_REQUEST", id: pending[0].id })}>Mark Fulfilled</Button>
-                    <Button variant="outline" onClick={() => dispatch({ type: "DISPATCH_FROM_WAREHOUSE", resource: "Water", amount: 10 })}>Dispatch 10 Water</Button>
+                    <Button onClick={() => fulfillRequest(pending[0].id)}>Mark Fulfilled</Button>
+                    <Button variant="outline" onClick={() => dispatchFromWarehouse("Water", 10)}>Dispatch 10 Water</Button>
                   </div>
                 </div>
               ) : (
@@ -75,8 +83,8 @@ export default function RescuePortal() {
                     </div>
                     <div className="mt-2 text-sm">{r.what}</div>
                     <div className="mt-3 flex gap-2">
-                      <Button onClick={() => dispatch({ type: "FULFILL_REQUEST", id: r.id })}>Fulfill</Button>
-                      <Button variant="outline" onClick={() => dispatch({ type: "REJECT_REQUEST", id: r.id })}>Reject</Button>
+                      <Button onClick={() => fulfillRequest(r.id)}>Fulfill</Button>
+                      <Button variant="outline" onClick={() => rejectRequest(r.id)}>Reject</Button>
                     </div>
                   </div>
                 ))}
@@ -96,8 +104,8 @@ export default function RescuePortal() {
             <section className="rounded-xl border bg-card p-6">
               <h3 className="text-lg font-bold">Resource Overview</h3>
               <ul className="mt-3 space-y-1 text-sm">
-                <li>Current available resources: <strong>{state.availableResources}</strong></li>
-                <li>People needing help: <strong>{state.peopleNeedingHelp}</strong></li>
+                <li>Current available resources: <strong>{availableResources}</strong></li>
+                <li>People needing help: <strong>{peopleNeedingHelp}</strong></li>
                 <li>Resources required based on requests: <strong>{pending.reduce((s, r) => s + (r.resourcesRequired ?? 1), 0)}</strong></li>
               </ul>
               <div className="mt-4 flex gap-2">
@@ -107,14 +115,14 @@ export default function RescuePortal() {
                   value={resourceInput}
                   onChange={(e) => setResourceInput(parseInt(e.target.value || "0"))}
                 />
-                <Button onClick={() => dispatch({ type: "UPDATE_AVAILABLE_RESOURCES", amount: resourceInput })}>Update</Button>
+                <Button onClick={() => updateAvailableResources(resourceInput)}>Update</Button>
               </div>
             </section>
 
             <section className="rounded-xl border bg-card p-6">
               <h3 className="text-lg font-bold">Requests Sidebar</h3>
               <ul className="mt-3 space-y-2 text-sm max-h-72 overflow-auto">
-                {state.requests.map((r) => (
+                {requests.map((r) => (
                   <li key={r.id} className="flex items-center justify-between">
                     <span>#{r.id}</span>
                     <span className="text-muted-foreground">{r.status}</span>

@@ -13,10 +13,14 @@ export function getDb(): BetterSQLite3Database {
   let drizzle: (db: Database) => BetterSQLite3Database;
   try {
     const require = createRequire(import.meta.url);
-    ({ default: BetterSqlite3 } = require("better-sqlite3") as { default: typeof Database });
-    ({ drizzle } = require("drizzle-orm/better-sqlite3") as {
-      drizzle: (db: Database) => BetterSQLite3Database;
-    });
+    const betterSqlite3Module = require("better-sqlite3");
+    console.log("betterSqlite3Module type:", typeof betterSqlite3Module);
+    console.log("betterSqlite3Module keys:", Object.keys(betterSqlite3Module));
+    // Handle both CommonJS and ES module exports
+    BetterSqlite3 = betterSqlite3Module.default || betterSqlite3Module;
+    console.log("BetterSqlite3 type:", typeof BetterSqlite3);
+    const drizzleModule = require("drizzle-orm/better-sqlite3");
+    drizzle = drizzleModule.drizzle;
   } catch (err) {
     console.error(
       "Database native module not available. Please run 'pnpm approve-builds' and select better-sqlite3, then rerun. Error:",

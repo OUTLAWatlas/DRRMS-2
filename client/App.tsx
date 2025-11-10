@@ -17,7 +17,6 @@ import RescuePortal from "./pages/RescuePortal";
 import ReportPage from "./pages/ReportPage";
 import RequestDashboard from "./pages/RequestDashboard";
 import ResourcesPage from "./pages/ResourcesPage";
-import { AppStoreProvider } from "./state/app-store";
 import SignIn from "./pages/SignIn";
 
 const App = () => (
@@ -26,24 +25,22 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <AppStoreProvider>
-          <div className="min-h-screen flex flex-col">
-            <SiteHeader />
-            <main className="flex-1">
-              <Routes>
-                <Route path="/" element={<Index />} />
-                <Route path="/user" element={<UserPortal />} />
-                <Route path="/report" element={<ReportPage />} />
-                <Route path="/request" element={<RequestDashboard />} />
-                <Route path="/resources" element={<ResourcesPage />} />
-                <Route path="/rescue" element={<RescuePortal />} />
-                <Route path="/signin" element={<SignIn />} />
-                {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            </main>
-          </div>
-        </AppStoreProvider>
+        <div className="min-h-screen flex flex-col">
+          <SiteHeader />
+          <main className="flex-1">
+            <Routes>
+              <Route path="/" element={<Index />} />
+              <Route path="/user" element={<UserPortal />} />
+              <Route path="/report" element={<ReportPage />} />
+              <Route path="/request" element={<RequestDashboard />} />
+              <Route path="/resources" element={<ResourcesPage />} />
+              <Route path="/rescue" element={<RescuePortal />} />
+              <Route path="/signin" element={<SignIn />} />
+              {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </main>
+        </div>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

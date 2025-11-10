@@ -6,22 +6,50 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { useState } from "react";
+import { toast } from "sonner";
+import { useSubmitReportMutation } from "@/hooks/api-hooks";
 
 export default function ReportPage() {
   const navigate = useNavigate();
-  const [form, setForm] = useState({ what: "", where: "", severity: "Moderate", when: "" });
+  const [form, setForm] = useState<{
+    what: string;
+    where: string;
+    severity: "Low" | "Moderate" | "High" | "Critical";
+    when: string;
+  }>({ what: "", where: "", severity: "Moderate", when: "" });
+  const submitReport = useSubmitReportMutation();
+
+  function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    
+    submitReport.mutate(
+      {
+        whatHappened: form.what,
+        location: form.where,
+        severity: form.severity,
+        occurredAt: form.when ? new Date(form.when).toISOString() : undefined,
+      },
+      {
+        onSuccess: () => {
+          toast.success("Disaster report submitted successfully");
+          // Reset form
+          setForm({ what: "", where: "", severity: "Moderate", when: "" });
+          // Optionally navigate to a different page
+          navigate("/rescue");
+        },
+        onError: (error) => {
+          toast.error(error.message || "Failed to submit report");
+        },
+      }
+    );
+  }
+
   return (
     <div className="py-10 sm:py-14">
       <h1 className="text-center text-3xl sm:text-4xl font-extrabold mb-8">Report a Disaster</h1>
       <div className="container mx-auto max-w-3xl">
         <div className="rounded-xl bg-white text-black p-6 sm:p-8 shadow-xl">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              navigate("/request", { state: { fromReport: true, prefill: form } });
-            }}
-            className="space-y-5"
-          >
+          <form onSubmit={onSubmit} className="space-y-5">
             <div>
               <Label htmlFor="what" className="flex items-center text-base">
                 <NumberBadge n={1} /> What happened?
@@ -56,7 +84,7 @@ export default function ReportPage() {
               </p>
               <RadioGroup
                 defaultValue={form.severity}
-                onValueChange={(v) => setForm((f) => ({ ...f, severity: v }))}
+                onValueChange={(v) => setForm((f) => ({ ...f, severity: v as "Low" | "Moderate" | "High" | "Critical" }))}
                 className="grid grid-cols-2 sm:grid-cols-4 gap-2"
               >
                 {(["Low", "Moderate", "High", "Critical"] as const).map((lvl) => (
@@ -84,7 +112,13 @@ export default function ReportPage() {
               />
             </div>
 
-            <Button type="submit" className="w-full h-12 text-base font-semibold">Continue</Button>
+            <Button 
+              type="submit" 
+              className="w-full h-12 text-base font-semibold"
+              disabled={submitReport.isPending}
+            >
+              {submitReport.isPending ? "Submitting..." : "Submit Report"}
+            </Button>
           </form>
         </div>
       </div>

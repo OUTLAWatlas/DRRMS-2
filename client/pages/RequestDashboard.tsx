@@ -8,7 +8,7 @@ import { useAppStore, newRequestId } from "@/state/app-store";
 import { toast } from "sonner";
 
 export default function RequestDashboard() {
-  const { state, dispatch } = useAppStore();
+  const submitRequest = useAppStore((state) => state.submitRequest);
   const loc = useLocation() as any;
   const prefill = loc.state?.prefill as
     | { what?: string; where?: string; severity?: string; when?: string }
@@ -36,20 +36,17 @@ export default function RequestDashboard() {
             onSubmit={(e) => {
               e.preventDefault();
               const id = newRequestId();
-              dispatch({
-                type: "SUBMIT_REQUEST",
-                payload: {
-                  id,
-                  kind: form.kind as any,
-                  what: form.what,
-                  where: form.where,
-                  severity: form.severity as any,
-                  when: form.when,
-                  people: Number(form.people) || 1,
-                  resourcesRequired: Number(form.resourcesRequired) || 1,
-                  contact: form.contact,
-                  status: "pending",
-                },
+              submitRequest({
+                id,
+                kind: form.kind as any,
+                what: form.what,
+                where: form.where,
+                severity: form.severity as any,
+                when: form.when,
+                people: Number(form.people) || 1,
+                resourcesRequired: Number(form.resourcesRequired) || 1,
+                contact: form.contact,
+                status: "pending",
               });
               toast.success(
                 "Help is on the way. If further assistance is required, request additional help.",

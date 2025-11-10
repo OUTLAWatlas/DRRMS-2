@@ -4,16 +4,20 @@ import { Button } from "@/components/ui/button";
 import { useEffect } from "react";
 
 export default function ResourcesPage() {
-  const { state, dispatch } = useAppStore();
+  const requests = useAppStore((state) => state.requests);
+  const warehouses = useAppStore((state) => state.warehouses);
+  const availableResources = useAppStore((state) => state.availableResources);
+  const adjustWarehouseStock = useAppStore((state) => state.adjustWarehouseStock);
+  const dispatchFromWarehouse = useAppStore((state) => state.dispatchFromWarehouse);
 
   useEffect(() => {
     const t = setInterval(() => {
-      if (state.requests.some((r) => r.status === "pending")) {
-        dispatch({ type: "DISPATCH_FROM_WAREHOUSE", resource: "Water", amount: 5 });
+      if (requests.some((r) => r.status === "pending")) {
+        dispatchFromWarehouse("Water", 5);
       }
     }, 5000);
     return () => clearInterval(t);
-  }, [state.requests, dispatch]);
+  }, [requests, dispatchFromWarehouse]);
 
   return (
     <div className="py-10 sm:py-14 container mx-auto">
@@ -22,10 +26,10 @@ export default function ResourcesPage() {
         <div className="rounded-xl border bg-card p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-bold">Warehouse Overview</h2>
-            <div className="text-sm text-muted-foreground">Available: {state.availableResources}</div>
+            <div className="text-sm text-muted-foreground">Available: {availableResources}</div>
           </div>
           <div className="space-y-5">
-            {state.warehouses.map((w) => {
+            {warehouses.map((w) => {
               const pct = Math.min(100, Math.round((w.stock / (w.stock + w.distributed || 1)) * 100));
               return (
                 <div key={w.type} className="rounded-lg border p-4">
@@ -40,13 +44,13 @@ export default function ResourcesPage() {
                     <div className="mt-3 flex gap-2">
                       <Button
                         variant="secondary"
-                        onClick={() => dispatch({ type: "ADJUST_WAREHOUSE_STOCK", resource: w.type, delta: 20 })}
+                        onClick={() => adjustWarehouseStock(w.type, 20)}
                       >
                         Incoming +20
                       </Button>
                       <Button
                         variant="outline"
-                        onClick={() => dispatch({ type: "DISPATCH_FROM_WAREHOUSE", resource: w.type, amount: 10 })}
+                        onClick={() => dispatchFromWarehouse(w.type, 10)}
                       >
                         Dispatch 10
                       </Button>
@@ -66,12 +70,12 @@ export default function ResourcesPage() {
             <li>Water stock below 20% in Mumbai warehouse</li>
           </ul>
           <div className="mt-6 flex gap-3">
-            <Button onClick={() => dispatch({ type: "ADJUST_WAREHOUSE_STOCK", resource: "Water", delta: 100 })}>
+            <Button onClick={() => adjustWarehouseStock("Water", 100)}>
               Update Stock
             </Button>
             <Button
               variant="outline"
-              onClick={() => dispatch({ type: "DISPATCH_FROM_WAREHOUSE", resource: "Food", amount: 50 })}
+              onClick={() => dispatchFromWarehouse("Food", 50)}
             >
               Dispatch Resources
             </Button>

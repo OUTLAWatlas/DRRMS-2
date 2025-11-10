@@ -1,4 +1,5 @@
-import { createContext, useContext, useMemo, useReducer } from "react";
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
 export type Severity = "Low" | "Moderate" | "High" | "Critical";
 export type RequestStatus = "pending" | "fulfilled" | "rejected";
@@ -24,7 +25,19 @@ export type WarehouseResource = {
   distributed: number;
 };
 
+export type User = {
+  id: number;
+  name: string;
+  email: string;
+  role: "survivor" | "rescuer" | "admin";
+};
+
 type State = {
+  // Auth state
+  authToken: string | null;
+  user: User | null;
+  
+  // App state
   requests: HelpRequest[];
   notifications: Notification[];
   warehouses: WarehouseResource[];
@@ -32,16 +45,25 @@ type State = {
   availableResources: number;
 };
 
-type Action =
-  | { type: "SUBMIT_REQUEST"; payload: HelpRequest }
-  | { type: "FULFILL_REQUEST"; id: string }
-  | { type: "REJECT_REQUEST"; id: string }
-  | { type: "ADD_NOTIFICATION"; payload: Notification }
-  | { type: "UPDATE_AVAILABLE_RESOURCES"; amount: number }
-  | { type: "ADJUST_WAREHOUSE_STOCK"; resource: string; delta: number }
-  | { type: "DISPATCH_FROM_WAREHOUSE"; resource: string; amount: number };
+type Actions = {
+  // Auth actions
+  setToken: (token: string | null) => void;
+  setUser: (user: User | null) => void;
+  logout: () => void;
+  
+  // App actions
+  submitRequest: (payload: HelpRequest) => void;
+  fulfillRequest: (id: string) => void;
+  rejectRequest: (id: string) => void;
+  addNotification: (payload: Notification) => void;
+  updateAvailableResources: (amount: number) => void;
+  adjustWarehouseStock: (resource: string, delta: number) => void;
+  dispatchFromWarehouse: (resource: string, amount: number) => void;
+};
 
 const initialState: State = {
+  authToken: null,
+  user: null,
   requests: [],
   notifications: [],
   warehouses: [
@@ -55,90 +77,98 @@ const initialState: State = {
   availableResources: 100,
 };
 
-function reducer(state: State, action: Action): State {
-  switch (action.type) {
-    case "SUBMIT_REQUEST": {
-      const r = action.payload;
-      const peopleNeedingHelp = state.peopleNeedingHelp + (r.people ?? 1);
-      const notifications = [
-        ...state.notifications,
-        {
-          id: `NTF${Date.now()}`,
-          message:
-            r.kind === "report"
-              ? `Disaster reported in ${r.where}. Severity: ${r.severity}`
-              : `Help requested in ${r.where}. ${r.people ?? 1} people affected` ,
-          area: r.where,
-          createdAt: Date.now(),
-        },
-      ];
-      return { ...state, requests: [r, ...state.requests], notifications, peopleNeedingHelp };
-    }
-    case "FULFILL_REQUEST": {
-      const idx = state.requests.findIndex((rq) => rq.id === action.id);
-      if (idx === -1) return state;
-      const req = state.requests[idx];
-      const resourcesUsed = req.resourcesRequired ?? 1;
-      const availableResources = Math.max(0, state.availableResources - resourcesUsed);
-      const peopleNeedingHelp = Math.max(0, state.peopleNeedingHelp - (req.people ?? 1));
-      const requests = state.requests.map((r) =>
-        r.id === req.id ? { ...r, status: "fulfilled" as RequestStatus } : r,
-      );
-      return { ...state, requests, availableResources, peopleNeedingHelp };
-    }
-    case "REJECT_REQUEST": {
-      const requests = state.requests.map((r) =>
-        r.id === action.id ? { ...r, status: "rejected" as RequestStatus } : r,
-      );
-      return { ...state, requests };
-    }
-    case "ADD_NOTIFICATION": {
-      return { ...state, notifications: [action.payload, ...state.notifications] };
-    }
-    case "UPDATE_AVAILABLE_RESOURCES": {
-      return { ...state, availableResources: Math.max(0, action.amount) };
-    }
-    case "ADJUST_WAREHOUSE_STOCK": {
-      const warehouses = state.warehouses.map((w) =>
-        w.type === action.resource ? { ...w, stock: Math.max(0, w.stock + action.delta) } : w,
-      );
-      const availableResources = Math.max(0, warehouses.reduce((sum, w) => sum + w.stock, 0));
-      return { ...state, warehouses, availableResources };
-    }
-    case "DISPATCH_FROM_WAREHOUSE": {
-      const warehouses = state.warehouses.map((w) =>
-        w.type === action.resource
-          ? {
-              ...w,
-              stock: Math.max(0, w.stock - action.amount),
-              distributed: w.distributed + action.amount,
-            }
-          : w,
-      );
-      const availableResources = Math.max(0, warehouses.reduce((sum, w) => sum + w.stock, 0));
-      return { ...state, warehouses, availableResources };
-    }
-    default:
-      return state;
-  }
-}
-
-const Ctx = createContext<{
-  state: State;
-  dispatch: React.Dispatch<Action>;
-} | null>(null);
-
-export function AppStoreProvider({ children }: { children: React.ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, initialState);
-  const value = useMemo(() => ({ state, dispatch }), [state]);
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
-}
-
-export function useAppStore() {
-  const c = useContext(Ctx);
-  if (!c) throw new Error("useAppStore must be used within AppStoreProvider");
-  return c;
-}
+export const useAppStore = create<State & Actions>()(
+  persist(
+    (set) => ({
+      ...initialState,
+      
+      // Auth actions
+      setToken: (token) => set({ authToken: token }),
+      setUser: (user) => set({ user }),
+      logout: () => set({ authToken: null, user: null }),
+      
+      // App actions
+      submitRequest: (payload) =>
+        set((state) => {
+          const r = payload;
+          const peopleNeedingHelp = state.peopleNeedingHelp + (r.people ?? 1);
+          const notifications = [
+            ...state.notifications,
+            {
+              id: `NTF${Date.now()}`,
+              message:
+                r.kind === "report"
+                  ? `Disaster reported in ${r.where}. Severity: ${r.severity}`
+                  : `Help requested in ${r.where}. ${r.people ?? 1} people affected`,
+              area: r.where,
+              createdAt: Date.now(),
+            },
+          ];
+          return { requests: [r, ...state.requests], notifications, peopleNeedingHelp };
+        }),
+        
+      fulfillRequest: (id) =>
+        set((state) => {
+          const idx = state.requests.findIndex((rq) => rq.id === id);
+          if (idx === -1) return state;
+          const req = state.requests[idx];
+          const resourcesUsed = req.resourcesRequired ?? 1;
+          const availableResources = Math.max(0, state.availableResources - resourcesUsed);
+          const peopleNeedingHelp = Math.max(0, state.peopleNeedingHelp - (req.people ?? 1));
+          const requests = state.requests.map((r) =>
+            r.id === req.id ? { ...r, status: "fulfilled" as RequestStatus } : r,
+          );
+          return { requests, availableResources, peopleNeedingHelp };
+        }),
+        
+      rejectRequest: (id) =>
+        set((state) => ({
+          requests: state.requests.map((r) =>
+            r.id === id ? { ...r, status: "rejected" as RequestStatus } : r,
+          ),
+        })),
+        
+      addNotification: (payload) =>
+        set((state) => ({
+          notifications: [payload, ...state.notifications],
+        })),
+        
+      updateAvailableResources: (amount) =>
+        set({ availableResources: Math.max(0, amount) }),
+        
+      adjustWarehouseStock: (resource, delta) =>
+        set((state) => {
+          const warehouses = state.warehouses.map((w) =>
+            w.type === resource ? { ...w, stock: Math.max(0, w.stock + delta) } : w,
+          );
+          const availableResources = Math.max(0, warehouses.reduce((sum, w) => sum + w.stock, 0));
+          return { warehouses, availableResources };
+        }),
+        
+      dispatchFromWarehouse: (resource, amount) =>
+        set((state) => {
+          const warehouses = state.warehouses.map((w) =>
+            w.type === resource
+              ? {
+                  ...w,
+                  stock: Math.max(0, w.stock - amount),
+                  distributed: w.distributed + amount,
+                }
+              : w,
+          );
+          const availableResources = Math.max(0, warehouses.reduce((sum, w) => sum + w.stock, 0));
+          return { warehouses, availableResources };
+        }),
+    }),
+    {
+      name: "drrms-store",
+      partialize: (state) => ({
+        authToken: state.authToken,
+        user: state.user,
+      }),
+    },
+  ),
+);
 
 export function newRequestId() {
   const n = Math.floor(Math.random() * 1000).toString().padStart(3, "0");

@@ -119,3 +119,73 @@ export type CreateWarehouseInput = z.infer<typeof createWarehouseSchema>;
 export type CreateResourceInput = z.infer<typeof createResourceSchema>;
 export type UpdateResourceInput = z.infer<typeof updateResourceSchema>;
 export type CreateAllocationInput = z.infer<typeof createAllocationSchema>;
+
+// -----------------------------
+// Response Types (from DB schema)
+// -----------------------------
+export type User = {
+  id: number;
+  name: string;
+  email: string;
+  role: "survivor" | "rescuer" | "admin";
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type LoginResponse = {
+  token: string;
+  user: User;
+};
+
+export type DisasterReport = {
+  id: number;
+  whatHappened: string;
+  location: string;
+  severity: "Low" | "Moderate" | "High" | "Critical";
+  status: "pending" | "in_progress" | "resolved" | "rejected";
+  occurredAt: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  reportedBy: number;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type RescueRequest = {
+  id: number;
+  location: string;
+  details: string;
+  peopleCount: number | null;
+  priority: "low" | "medium" | "high";
+  status: "pending" | "in_progress" | "fulfilled" | "cancelled";
+  requestedBy: number;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type Warehouse = {
+  id: number;
+  name: string;
+  location: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type Resource = {
+  id: number;
+  type: string;
+  quantity: number;
+  warehouseId: number;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type ResourceAllocation = {
+  id: number;
+  requestId: number;
+  resourceId: number;
+  quantity: number;
+  allocatedBy: number;
+  createdAt: number;
+  updatedAt: number;
+};

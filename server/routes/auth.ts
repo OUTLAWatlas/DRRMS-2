@@ -12,9 +12,9 @@ const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 router.post("/register", async (req, res) => {
   try {
     const data = registerSchema.parse(req.body);
-  const db = getDb();
-  const existing = await db.select().from(users).where(eq(users.email, data.email)).get?.();
-    if (existing) {
+    const db = getDb();
+    const existingUsers = await db.select().from(users).where(eq(users.email, data.email));
+    if (existingUsers.length > 0) {
       return res.status(409).json({ error: "Email already registered" });
     }
     const passwordHash = await bcrypt.hash(data.password, 10);
@@ -33,15 +33,22 @@ router.post("/register", async (req, res) => {
 
 router.post("/login", async (req, res) => {
   try {
+    console.log("Login attempt:", req.body);
     const data = loginSchema.parse(req.body);
-  const db = getDb();
-  const user = await db.select().from(users).where(eq(users.email, data.email)).get?.();
-    if (!user) return res.status(401).json({ error: "Invalid credentials" });
+    console.log("Parsed data:", data);
+    const db = getDb();
+    console.log("Got DB connection");
+    const users_result = await db.select().from(users).where(eq(users.email, data.email));
+    console.log("Query result:", users_result);
+    if (users_result.length === 0) return res.status(401).json({ error: "Invalid credentials" });
+    const user = users_result[0];
     const ok = await bcrypt.compare(data.password, user.passwordHash);
+    console.log("Password check:", ok);
     if (!ok) return res.status(401).json({ error: "Invalid credentials" });
     const token = jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET, { expiresIn: "7d" });
     return res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
   } catch (e: any) {
+    console.error("Login error:", e);
     if (e?.issues) return res.status(400).json({ error: "Invalid data", details: e.issues });
     return res.status(500).json({ error: "Internal server error" });
   }
