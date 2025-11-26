@@ -11,6 +11,8 @@ export default function SignIn() {
   const [password, setPassword] = useState("");
   const navigate = useNavigate();
   const loginMutation = useLoginMutation();
+  const params = new URLSearchParams(window.location.search);
+  const nextParam = params.get("next");
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -26,16 +28,18 @@ export default function SignIn() {
         onSuccess: (data) => {
           toast.success("Signed in successfully");
           
-          // Navigate based on user role
-          if (data.user.role === "survivor") {
-            navigate("/request");
-          } else if (data.user.role === "rescuer") {
-            navigate("/rescue");
-          } else if (data.user.role === "admin") {
-            navigate("/resources");
-          } else {
-            navigate("/");
-          }
+            // Navigate to `next` if present, otherwise use role-based defaults
+            if (nextParam) {
+              navigate(nextParam);
+            } else if (data.user.role === "survivor") {
+              navigate("/request");
+            } else if (data.user.role === "rescuer") {
+              navigate("/rescue");
+            } else if (data.user.role === "admin") {
+              navigate("/resources");
+            } else {
+              navigate("/");
+            }
         },
         onError: (error) => {
           toast.error(error.message || "Failed to sign in");

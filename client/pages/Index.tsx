@@ -48,9 +48,9 @@ function HeroPanel({ image, label, to, onEnter, onLeave, active }: { image: stri
     >
       <img src={image} alt="" className={"absolute inset-0 w-full h-full object-cover transition-transform duration-500 " + (active ? "scale-105" : "scale-100")} />
       <div className="absolute inset-0 bg-black/40" />
-      <div className="relative z-10 h-full w-full flex items-center justify-center">
+        <div className="relative z-10 h-full w-full flex items-center justify-center">
         <Link
-          to={to}
+          to={to.startsWith("/user") ? "/signin?next=/user" : to.startsWith("/rescue") ? "/signin?next=/rescue" : to}
           className="rounded-full bg-white px-7 py-4 text-base font-semibold shadow-xl hover:scale-[1.03] active:scale-[0.98] transition-transform"
         >
           {label}

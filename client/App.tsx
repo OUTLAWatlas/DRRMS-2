@@ -18,6 +18,8 @@ import ReportPage from "./pages/ReportPage";
 import RequestDashboard from "./pages/RequestDashboard";
 import ResourcesPage from "./pages/ResourcesPage";
 import SignIn from "./pages/SignIn";
+import SignUp from "./pages/SignUp";
+import RequireAuth from "@/components/RequireAuth";
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -30,12 +32,13 @@ const App = () => (
           <main className="flex-1">
             <Routes>
               <Route path="/" element={<Index />} />
-              <Route path="/user" element={<UserPortal />} />
+              <Route path="/user" element={<RequireAuth><UserPortal /></RequireAuth>} />
               <Route path="/report" element={<ReportPage />} />
               <Route path="/request" element={<RequestDashboard />} />
               <Route path="/resources" element={<ResourcesPage />} />
-              <Route path="/rescue" element={<RescuePortal />} />
+              <Route path="/rescue" element={<RequireAuth><RescuePortal /></RequireAuth>} />
               <Route path="/signin" element={<SignIn />} />
+              <Route path="/signup" element={<SignUp />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />
             </Routes>

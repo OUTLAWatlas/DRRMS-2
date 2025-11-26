@@ -21,24 +21,6 @@ export default function SiteHeader() {
               User Portal
             </Link>
             <Link
-              to="/report"
-              className={
-                "hover:opacity-80 transition-opacity " +
-                (location.pathname.startsWith("/report") ? "underline underline-offset-4" : "")
-              }
-            >
-              Report
-            </Link>
-            <Link
-              to="/resources"
-              className={
-                "hover:opacity-80 transition-opacity " +
-                (location.pathname.startsWith("/resources") ? "underline underline-offset-4" : "")
-              }
-            >
-              Resources
-            </Link>
-            <Link
               to="/rescue"
               className={
                 "hover:opacity-80 transition-opacity " +

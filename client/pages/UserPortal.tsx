@@ -1,6 +1,7 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 export default function UserPortal() {
+  const navigate = useNavigate();
   return (
     <div className="bg-background">
       <div className="relative h-[60vh] min-h-[380px]">
@@ -12,9 +13,14 @@ export default function UserPortal() {
         <div className="absolute inset-0 bg-black/45" />
         <div className="relative z-10 flex h-full items-center justify-center">
           <div className="flex flex-wrap gap-6 justify-center">
-            <a href="/request" className="rounded-full bg-white px-6 py-3 font-semibold shadow-lg">REQUEST HELP</a>
-            <a href="/resources" className="rounded-full bg-white px-6 py-3 font-semibold shadow-lg">RESOURCES</a>
-            <a href="/request" className="rounded-full bg-white px-6 py-3 font-semibold shadow-lg">REPORT DISASTER</a>
+            <Link to="/request" className="rounded-full bg-white px-6 py-3 font-semibold shadow-lg">REQUEST HELP</Link>
+            <Link to="/resources" className="rounded-full bg-white px-6 py-3 font-semibold shadow-lg">RESOURCES</Link>
+            <button
+              onClick={() => navigate("/request", { state: { fromReport: true } })}
+              className="rounded-full bg-white px-6 py-3 font-semibold shadow-lg"
+            >
+              REPORT DISASTER
+            </button>
           </div>
         </div>
       </div>

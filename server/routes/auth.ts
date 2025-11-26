@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { loginSchema, registerSchema } from "../../shared/api";
+import { authMiddleware } from "../middleware/auth";
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
@@ -55,3 +56,18 @@ router.post("/login", async (req, res) => {
 });
 
 export default router;
+
+router.get("/me", authMiddleware, async (req, res) => {
+  try {
+    // @ts-ignore - authMiddleware attaches user
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const db = getDb();
+    const u = await db.select().from(users).where(eq(users.id, userId)).get?.();
+    if (!u) return res.status(404).json({ error: "Not found" });
+    return res.json({ id: u.id, name: u.name, email: u.email, role: u.role });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});

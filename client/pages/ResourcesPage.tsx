@@ -42,18 +42,7 @@ export default function ResourcesPage() {
                   <div className="mt-3">
                     <Progress value={pct} />
                     <div className="mt-3 flex gap-2">
-                      <Button
-                        variant="secondary"
-                        onClick={() => adjustWarehouseStock(w.type, 20)}
-                      >
-                        Incoming +20
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={() => dispatchFromWarehouse(w.type, 10)}
-                      >
-                        Dispatch 10
-                      </Button>
+                      <div className="text-sm text-muted-foreground">Read-only monitor: actions restricted</div>
                     </div>
                   </div>
                 </div>
@@ -70,15 +59,7 @@ export default function ResourcesPage() {
             <li>Water stock below 20% in Mumbai warehouse</li>
           </ul>
           <div className="mt-6 flex gap-3">
-            <Button onClick={() => adjustWarehouseStock("Water", 100)}>
-              Update Stock
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => dispatchFromWarehouse("Food", 50)}
-            >
-              Dispatch Resources
-            </Button>
+            <div className="text-sm text-muted-foreground">Actions disabled for monitoring users.</div>
           </div>
           <div className="mt-6 text-sm text-muted-foreground">
             Stock levels refresh in real-time as resources are distributed or received.
