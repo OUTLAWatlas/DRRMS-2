@@ -1,5 +1,6 @@
 import "./global.css";
 
+import { useEffect } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { createRoot } from "react-dom/client";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -19,7 +20,10 @@ import RequestDashboard from "./pages/RequestDashboard";
 import ResourcesPage from "./pages/ResourcesPage";
 import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
+import ForgotPassword from "./pages/ForgotPassword";
+import AdminPortal from "./pages/AdminPortal";
 import RequireAuth from "@/components/RequireAuth";
+import { useAppStore } from "@/state/app-store";
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -27,18 +31,49 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <div className="min-h-screen flex flex-col">
+        <SessionAutoLogout />
+            <div className="min-h-screen flex flex-col">
           <SiteHeader />
           <main className="flex-1">
             <Routes>
               <Route path="/" element={<Index />} />
-              <Route path="/user" element={<RequireAuth><UserPortal /></RequireAuth>} />
+              <Route
+                path="/user"
+                element={
+                  <RequireAuth allowedRoles={["survivor"]}>
+                    <UserPortal />
+                  </RequireAuth>
+                }
+              />
               <Route path="/report" element={<ReportPage />} />
               <Route path="/request" element={<RequestDashboard />} />
-              <Route path="/resources" element={<ResourcesPage />} />
-              <Route path="/rescue" element={<RequireAuth><RescuePortal /></RequireAuth>} />
+              <Route
+                path="/resources"
+                element={
+                  <RequireAuth allowedRoles={["admin"]}>
+                    <ResourcesPage />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/admin"
+                element={
+                  <RequireAuth allowedRoles={["admin"]}>
+                    <AdminPortal />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/rescue"
+                element={
+                  <RequireAuth allowedRoles={["rescuer"]}>
+                    <RescuePortal />
+                  </RequireAuth>
+                }
+              />
               <Route path="/signin" element={<SignIn />} />
               <Route path="/signup" element={<SignUp />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />
             </Routes>
@@ -50,3 +85,21 @@ const App = () => (
 );
 
 createRoot(document.getElementById("root")!).render(<App />);
+
+function SessionAutoLogout() {
+  useEffect(() => {
+    const handleUnload = () => {
+      useAppStore.getState().logout();
+    };
+
+    window.addEventListener("pagehide", handleUnload);
+    window.addEventListener("beforeunload", handleUnload);
+
+    return () => {
+      window.removeEventListener("pagehide", handleUnload);
+      window.removeEventListener("beforeunload", handleUnload);
+    };
+  }, []);
+
+  return null;
+}

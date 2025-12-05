@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useMemo, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -10,9 +10,20 @@ export default function SignIn() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const navigate = useNavigate();
+  const location = useLocation();
   const loginMutation = useLoginMutation();
-  const params = new URLSearchParams(window.location.search);
-  const nextParam = params.get("next");
+  const nextPath = useMemo(() => {
+    const searchParams = new URLSearchParams(location.search);
+    const raw = searchParams.get("next");
+    if (!raw) return null;
+    try {
+      const decoded = decodeURIComponent(raw);
+      return decoded.startsWith("/") ? decoded : null;
+    } catch (error) {
+      console.warn("Invalid next param", error);
+      return null;
+    }
+  }, [location.search]);
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -29,8 +40,8 @@ export default function SignIn() {
           toast.success("Signed in successfully");
           
             // Navigate to `next` if present, otherwise use role-based defaults
-            if (nextParam) {
-              navigate(nextParam);
+            if (nextPath) {
+              navigate(nextPath);
             } else if (data.user.role === "survivor") {
               navigate("/request");
             } else if (data.user.role === "rescuer") {
@@ -76,6 +87,11 @@ export default function SignIn() {
             disabled={loginMutation.isPending}
           />
         </div>
+        <div className="text-right">
+          <Link to="/forgot-password" className="text-sm text-brand underline-offset-4 hover:underline">
+            Forgot password?
+          </Link>
+        </div>
         <Button 
           type="submit" 
           className="w-full h-12 text-base font-semibold" 
@@ -86,6 +102,12 @@ export default function SignIn() {
         
         <p className="mt-4 text-xs text-muted-foreground text-center">
           Test credentials: rescuer@drrms.org / password123
+        </p>
+        <p className="text-sm text-center">
+          Need an account?{" "}
+          <Link to="/signup" className="text-brand underline-offset-4 hover:underline">
+            Create one now
+          </Link>
         </p>
       </form>
     </div>

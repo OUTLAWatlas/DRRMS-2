@@ -3,7 +3,7 @@ import { getDb } from "../db";
 import { warehouses, resources } from "../db/schema";
 import { authMiddleware, rescuerOnly } from "../middleware/auth";
 import { eq, desc } from "drizzle-orm";
-import { createWarehouseSchema } from "../../shared/api";
+import { createWarehouseSchema, updateWarehouseSchema } from "../../shared/api";
 import { z } from "zod";
 
 const router = Router();
@@ -22,7 +22,14 @@ router.post("/", authMiddleware, rescuerOnly, async (req, res) => {
     const db = getDb();
     const [created] = await db
       .insert(warehouses)
-      .values({ name: data.name, location: data.location })
+      .values({
+        name: data.name,
+        location: data.location,
+        capacity: data.capacity ?? 0,
+        lastAuditedAt: data.lastAuditedAt ? new Date(data.lastAuditedAt) : null,
+        latitude: data.latitude ?? null,
+        longitude: data.longitude ?? null,
+      })
       .returning();
     res.status(201).json(created);
   } catch (error) {
@@ -44,6 +51,47 @@ router.get("/:id", authMiddleware, async (req, res) => {
     if (!warehouse) return res.status(404).json({ error: "Warehouse not found" });
     res.json(warehouse);
   } catch (_e) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// PUT /api/warehouses/:id - Update warehouse metadata
+router.put("/:id", authMiddleware, rescuerOnly, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid warehouse ID" });
+
+    const validated = updateWarehouseSchema.parse(req.body);
+    const updatePayload: Record<string, unknown> = {};
+    if (validated.name !== undefined) updatePayload.name = validated.name;
+    if (validated.location !== undefined) updatePayload.location = validated.location;
+    if (validated.capacity !== undefined) updatePayload.capacity = validated.capacity;
+    if (validated.lastAuditedAt !== undefined) {
+      updatePayload.lastAuditedAt = validated.lastAuditedAt
+        ? new Date(validated.lastAuditedAt)
+        : null;
+    }
+    if (validated.latitude !== undefined) updatePayload.latitude = validated.latitude;
+    if (validated.longitude !== undefined) updatePayload.longitude = validated.longitude;
+    updatePayload.updatedAt = new Date();
+
+    if (Object.keys(updatePayload).length === 1 && "updatedAt" in updatePayload) {
+      return res.status(400).json({ error: "No updates provided" });
+    }
+
+    const db = getDb();
+    const [updated] = await db
+      .update(warehouses)
+      .set(updatePayload)
+      .where(eq(warehouses.id, id))
+      .returning();
+
+    if (!updated) return res.status(404).json({ error: "Warehouse not found" });
+    res.json(updated);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Invalid warehouse update", details: error.errors });
+    }
     res.status(500).json({ error: "Internal server error" });
   }
 });

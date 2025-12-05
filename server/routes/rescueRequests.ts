@@ -21,6 +21,8 @@ router.post("/", authMiddleware, async (req: AuthRequest, res) => {
         details: data.details,
         peopleCount: data.peopleCount,
         priority: data.priority,
+        latitude: data.latitude ?? null,
+        longitude: data.longitude ?? null,
       })
       .returning();
     res.status(201).json(created);

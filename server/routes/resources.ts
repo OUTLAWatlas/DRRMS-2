@@ -45,6 +45,8 @@ router.post("/", authMiddleware, rescuerOnly, async (req, res) => {
         type: validatedData.type,
         quantity: validatedData.quantity,
         warehouseId: validatedData.warehouseId,
+        unit: validatedData.unit ?? "units",
+        reorderLevel: validatedData.reorderLevel ?? 0,
       })
       .returning();
     res.status(201).json(newResource);

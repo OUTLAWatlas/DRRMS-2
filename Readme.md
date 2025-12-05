@@ -1,143 +1,170 @@
 _**🌍 Disaster Relief Resource Management System (DRRMS)**_
-**📖 Overview**
 
-The Disaster Relief Resource Management System (DRRMS) is an internet-based platform designed to optimize the allocation and deployment of critical resources during natural and man-made disasters.
+DRRMS is a full-stack TypeScript application that helps coordinators triage rescue requests, track inventory across warehouses, and push proactive allocation suggestions during fast-moving disasters. The platform exposes two SPA portals:
 
-The system provides dual portals:
+- 🧑‍🚒 **Rescuer Portal** – Admin view with live feeds, dynamic priority queue, predictive recommendations, and allocation tooling.
+- 🆘 **Survivor Portal** – Form-based workflow for reporting incidents or requesting aid (currently backed by an in-memory store).
 
-🧑‍🚒 Rescuer Portal – For relief agencies, NGOs, and government authorities to allocate, track, and manage resources.
+The current codebase (Fusion starter) ships with:
 
-🆘 Survivor Portal – For disaster-affected individuals to request aid, report needs, and track relief status.
+- React 18 + React Router 6 + Vite + Tailwind on the client.
+- Express + Vite-integrated server with Drizzle ORM over SQLite.
+- Shared type definitions in `shared/` to keep API responses in sync.
+- Background schedulers for demand snapshots, predictive allocation, and live feed ingestion (weather + government alerts).
 
-At its core, DRRMS leverages dynamic scoring and criticality thresholds to intelligently prioritize rescue and resource distribution. The system is built as a multi-semester project, expanding gradually to integrate real-time data, offline-first capabilities, AI-driven decision-making, and advanced security protocols.
+## 🎯 Project Objectives
 
-**🎯 Objectives**
+- Prioritize requests using transparent scoring (severity, time decay, proximity, hub capacity, supply pressure).
+- Give operators readouts on demand vs inventory and predictive lead times.
+- Track transactions, allocations, and warehouse stock across hubs.
+- Provide a survivor-friendly interface for logging incidents even before responders reach the field.
+- Incrementally add advanced capabilities (offline sync, richer GIS, blockchain auditable logs) as the roadmap progresses.
 
-Enable efficient resource allocation during disasters.
+## ⚙️ Implemented Features
 
-Provide real-time communication between survivors and rescuers.
+- 🔐 Auth & role gating (survivor, rescuer, admin) with pending-approval workflow.
+- 📦 Warehouse + resource inventory management, transfers, and allocation history.
+- 🆘 Rescue request intake with priority snapshots stored in `request_priority_snapshots`.
+- 📊 **Dynamic prioritization engine** with the latest signal set: time decay, supply pressure, geographic proximity, nearest hub capacity ratio, and rationale logging.
+- 🤖 **Predictive allocation loop** that reads demand feature snapshots, calculates travel ETA based on nearest hub, and returns confidence/impact metrics.
+- 🌦️ Live weather + alert feeds using Open-Meteo/weather.gov plus manual refresh controls.
+- 📈 Demand heatmap + latency trend visualizations.
+- 💰 Transaction logging for reimbursements/expenses.
 
-Minimize delays with automated prioritization of critical needs.
+## 🚧 Roadmap & Future Work
 
-Ensure transparency and accountability in relief operations.
+These items are planned but not yet fully implemented in the codebase:
 
-Support scalable, secure, and offline-capable infrastructure for real-world deployment.
+- Survivor portal still relies on a local Zustand store; needs wiring to `/api/rescue-requests` and `/api/disaster-reports`.
+- Offline-first and blockchain auditing are conceptual only.
+- GIS experience is limited to aggregated grids—no live map overlays yet.
+- PostgreSQL/PostGIS migration is a future step; current storage is SQLite via Drizzle.
+- Background job observability (dashboards/health checks) is pending.
+- Parameterized bootstrap datasets now ship via `pnpm db:seed`; infra automation still needs polish.
 
-**⚙️ Features**
-✅ Core Features (Semester 1)
+See `FEATURE_ROADMAP.md` for the long-form backlog.
 
-🔑 Authentication System (Survivors & Rescuers)
+### 🌦️ Real-Time Feed Configuration
 
-📦 Resource Management Module – Track supplies (food, medicine, shelters, etc.)
+The live feed scheduler now connects to real external sources by default (Open-Meteo for weather + weather.gov alerts). Configure behaviour via environment variables:
 
-🆘 Request Management – Survivors submit requests with location & need details
+| Variable | Description | Default |
+| --- | --- | --- |
+| `WEATHER_PROVIDER` | `openweather`, `openmeteo`, or `mock`. `openmeteo` uses the free Open-Meteo API. | `openmeteo` (unless `WEATHER_API_KEY` is set)
+| `WEATHER_API_KEY` | Required when `WEATHER_PROVIDER=openweather` to call the OpenWeather API. | – |
+| `WEATHER_API_URL` | Optional override for provider base URL. | Provider default |
+| `GOV_ALERT_PROVIDER` | `weather-gov`, `feed`, or `mock`. `weather-gov` consumes the public NOAA feed. | `weather-gov`
+| `GOV_ALERT_BASE_URL` | Custom weather.gov endpoint (e.g., CAP filters). | `https://api.weather.gov/alerts/active`
+| `GOV_ALERT_REGION` | Optional U.S. state/area filter passed as the `area` query param. | all regions |
+| `GOV_ALERT_LIMIT` | Number of alerts to ingest per refresh (1–50). | 10 |
+| `GOV_ALERT_FEED_URL` | If set, overrides the provider and ingests from your custom CAP/RSS feed. | – |
 
-📊 Dynamic Prioritization Engine – Allocates resources using scoring algorithms
+> Tip: When you need an authenticated weather feed, supply `WEATHER_API_KEY` for OpenWeather and keep a reasonable retry count with `LIVE_FEED_MAX_RETRIES`.
 
-💰 Transaction & Revenue Tracking (for paid services/logistics)
+### 📈 Demand Snapshot Aggregation
 
-📅 Booking & Allocation History
+Predictive recommendations now lean on rolling `demand_feature_snapshots`. The server aggregates every few minutes so the model can observe recent pending volume, inventory, and weather overlays.
 
-🚀 Advanced Features (Future Semesters)
+| Variable | Description | Default |
+| --- | --- | --- |
+| `DEMAND_SNAPSHOT_INTERVAL_MS` | How often to run the aggregation scheduler. | 15 minutes |
+| `DEMAND_SNAPSHOT_BUCKET_MINUTES` | Width of each bucket stored in `demand_feature_snapshots`. | 30 minutes |
+| `DISABLE_DEMAND_SNAPSHOT` | Set to `true` to skip the scheduler (e.g., CI). | `false` |
 
-🌐 Real-Time Data Integration (weather APIs, government feeds, etc.)
+Snapshots are also generated during `pnpm db:seed` so fresh environments ship with baseline data.
 
-🤖 AI-Powered Predictive Allocation – Anticipate demand based on patterns
+## 🛠️ Tech Stack (Current)
 
-🔒 Blockchain for Transparency – Immutable records of aid distribution
+| Layer | Technology |
+| --- | --- |
+| Frontend | React 18, React Router 6, TypeScript, TailwindCSS, Radix UI, Vite |
+| State | TanStack Query for server data, Zustand for lightweight local state |
+| Backend | Express (TypeScript) running alongside Vite dev server |
+| ORM / DB | Drizzle ORM + SQLite (dev) – pluggable to PostgreSQL later |
+| Schedulers | Node timers for demand snapshots, predictive allocation, live feeds |
+| Tooling | pnpm, Vitest, ESLint, Prettier |
 
-📡 Offline-First Capability – Resilient system in low-connectivity zones
+Planned upgrades (not yet implemented): PostgreSQL/PostGIS migration, containerized deployment, background job runner moves to a queue (BullMQ/Celery equivalent).
 
-📍 Geospatial Mapping – Heatmaps for demand, supply & disaster zones
+## 🚀 Getting Started
 
-**🏗️ Software Architecture**
+1. **Install dependencies**
 
-The system follows a modular, service-oriented architecture with clear separation of concerns.
+	```bash
+	pnpm install
+	```
 
-🔹 High-Level Architecture
+2. **Start dev servers (client + server on port 8080)**
 
-Frontend (UI/UX): ReactJS / Next.js with TailwindCSS
+	```bash
+	pnpm dev
+	```
 
-Backend (API): Flask (Python) with REST APIs
+3. **Type checking & tests**
 
-Database: PostgreSQL (preferred for scalability & GIS support)
+	```bash
+	pnpm typecheck
+	pnpm test
+	```
 
-Resource Allocation Engine: Python-based scoring algorithms
+4. **Production build & serve**
 
-Hosting/Cloud: AWS / GCP (future scaling)
+	```bash
+	pnpm build
+	pnpm start
+	```
 
-Security: JWT authentication, role-based access
+	### 📦 Bootstrap Sample Data
 
-**🛠️ Tech Stack**
-🌐 Frontend
+	Spin up realistic warehouses, resources, rescue requests, and historical `demand_feature_snapshots` with the seed profiles:
 
-ReactJS / Next.js – Component-based UI
+	```bash
+	# Default developer dataset
+	pnpm db:seed
 
-TailwindCSS / ShadCN UI – Modern, responsive styling
+	# Heavier narrative for demos
+	pnpm db:seed demo
 
-Framer Motion – Smooth animations
+	# Lean production bootstrap (also works with SEED_PROFILE=prod pnpm db:seed)
+	pnpm db:seed prod
+	```
 
-Axios – API communication
+	All profiles ensure the admin/rescuer accounts exist, hydrate the baseline warehouses/resources, insert curated rescue tickets, and backfill multiple demand snapshot buckets so dashboards never appear empty after deploy.
 
-⚙️ Backend
+### Background Schedulers & Env Vars
 
-Flask (Python) – REST API framework
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `PREDICTIVE_REFRESH_INTERVAL_MS` | How often the predictive allocation cycle runs. | `5 * 60 * 1000` |
+| `PREDICTIVE_DEMAND_LOOKBACK_MS` | Demand history window for predictions. | `6 * 60 * 60 * 1000` |
+| `DEMAND_SNAPSHOT_INTERVAL_MS` | Aggregation cadence for `demand_feature_snapshots`. | `15 * 60 * 1000` |
+| `DEMAND_SNAPSHOT_BUCKET_MINUTES` | Bucket width stored in the snapshot table. | `30` |
+| `DISABLE_DEMAND_SNAPSHOT`, `DISABLE_PREDICTIVE_SCHEDULER` | Set to `true` to stop schedulers (useful in CI). | `false` |
+| `WEATHER_PROVIDER`, `WEATHER_API_KEY` | Configure Open-Meteo vs OpenWeather ingestion. | `openmeteo` |
+| `GOV_ALERT_PROVIDER`, `GOV_ALERT_FEED_URL` | Choose weather.gov alerts or a custom CAP feed. | `weather-gov` |
 
-Flask-RESTful – Endpoint management
+After changing prioritization weights or schema columns, trigger a snapshot backfill so history lines up with the new logic:
 
-psycopg2 / SQLAlchemy – PostgreSQL connectivity
+```bash
+curl -X POST http://localhost:8080/api/priorities/recalculate
+```
 
-Celery + Redis (future) – Task scheduling & background jobs
+This is the same endpoint behind the “Recalculate” button on the Admin Portal.
 
-🗄️ Database
+## 📊 How Prioritization Works Today
 
-PostgreSQL – Advanced relational database with:
+Each rescuer-visible request receives a score composed of:
 
-✅ Support for JSONB – Store semi-structured disaster reports
+- Severity weight (High/Medium/Low) ⚠️
+- People count weight 👥
+- Time-decay weight ⏱️ (exponential decay ~12h half-life)
+- Supply pressure (pending vs total stock) 📦
+- Geographic proximity to the nearest warehouse 📍
+- Hub capacity ratio (stock/capacity) 🏭
 
-✅ PostGIS Extension – Geospatial queries for mapping & allocation
+Snapshots persist these weights plus the nearest hub metadata so operators can audit why a request shows up at the top of the queue.
 
-✅ Advanced Indexing – Faster query execution under heavy load
-
-✅ ACID Compliance – Ensures data integrity in crisis conditions
-
-Core Tables:
-
-resources (types, quantities, locations)
-
-requests (survivor submissions + geo-coordinates)
-
-rescuers (NGOs, government units)
-
-transactions (aid & funding records)
-
-bookings (allocations & logistics)
-
-☁️ Cloud & DevOps (Planned)
-
-Docker & Kubernetes – Containerization & orchestration
-
-CI/CD Pipelines – GitHub Actions / Jenkins
-
-AWS/GCP Cloud Deployment – Scalable infrastructure
-
-Terraform (IaC) – Infrastructure automation
-
-**📊 Resource Allocation Algorithm**
-
-The Dynamic Scoring Model considers:
-
-🚨 Severity of request (medical > shelter > food)
-
-📍 Geographic proximity (PostGIS queries)
-
-👨‍👩‍👧 Number of survivors affected
-
-⏳ Time since request submitted
-
-🏢 Resource availability at nearest hub
-
-Each request gets a Criticality Score → Resources allocated to highest scores first.
+Predictive recommendations reuse the same signals, add travel-time estimates, and output lead-time/confidence plus a rationale string.
 
 **🔒 Security & Ethics**
 Data Encryption for sensitive info
@@ -148,17 +175,13 @@ Transparency Logs for resource allocation
 
 Ethical Use Guidelines – Built to save lives, not for misuse
 
-**🤝 Contributing**
+## 🤝 Contributing
 
-Contributions are welcome! 🚀
+1. Fork the repo and create a feature branch (`feature/new-module`).
+2. Run `pnpm typecheck` and `pnpm test` before pushing.
+3. Open a PR describing the feature and any scheduler/env changes.
 
-Fork the repo
-
-Create a feature branch (feature/new-module)
-
-Commit changes (git commit -m "Added X feature")
-
-Open a pull request
+Check `CODEBASE_DOCUMENTATION.md` plus `ARCHITECTURE.md` for deeper references.
 
 **👥 Team**
 Frontend Engg - Arrnav Pawar, Mahendra Patil

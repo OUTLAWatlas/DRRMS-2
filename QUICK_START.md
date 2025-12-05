@@ -92,6 +92,40 @@ pnpm build
 pnpm start
 ```
 
+### Seed Sample Data
+
+Populate warehouses, resources, rescue requests, and demand snapshots before opening the UI:
+
+```bash
+# Default developer dataset
+pnpm db:seed
+
+# Richer storyline for product demos
+pnpm db:seed demo
+
+# Minimal production bootstrap
+pnpm db:seed prod
+```
+
+You can also run `SEED_PROFILE=demo pnpm db:seed` if you prefer environment variables. Each profile keeps the admin/rescuer accounts in sync and preloads the analytics tables so dashboards are informative immediately after deployment.
+
+---
+
+## Backfill Priority Snapshots
+
+Whenever the prioritization engine gains new signal fields (like proximity or hub-capacity weights), rerun the snapshot job so historical records capture the latest metrics:
+
+1. Ensure the dev server is running (`pnpm dev`).
+2. Trigger the backfill via API:
+
+  ```bash
+  curl -X POST http://localhost:8080/api/priorities/recalculate
+  ```
+
+  This hits the same endpoint wired to the **Recalculate** button inside the Admin Portal and rewrites `request_priority_snapshots` entries with the new signal weights.
+
+Run this once after deploying new prioritization logic or whenever you need to refresh the scoring history.
+
 ---
 
 ## Project Structure

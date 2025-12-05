@@ -1,8 +1,10 @@
 import { Link } from "react-router-dom";
 import { useState } from "react";
+import { useAppStore } from "@/state/app-store";
 
 export default function Index() {
   const [hovered, setHovered] = useState<"user" | "rescue" | null>(null);
+  const isAuthenticated = useAppStore((state) => Boolean(state.authToken && state.user));
 
   const cols = hovered === "user" ? "7fr 3fr" : hovered === "rescue" ? "3fr 7fr" : "1fr 1fr";
 
@@ -21,6 +23,7 @@ export default function Index() {
             image="https://images.pexels.com/photos/3662770/pexels-photo-3662770.jpeg?auto=compress&cs=tinysrgb&w=1600"
             label="USER PORTAL"
             to="/user"
+            isAuthenticated={isAuthenticated}
             onEnter={() => setHovered("user")}
             onLeave={() => setHovered(null)}
             active={hovered === "user"}
@@ -29,6 +32,7 @@ export default function Index() {
             image="https://images.pexels.com/photos/942320/pexels-photo-942320.jpeg?auto=compress&cs=tinysrgb&w=1600"
             label="RESCUE PORTAL"
             to="/rescue"
+            isAuthenticated={isAuthenticated}
             onEnter={() => setHovered("rescue")}
             onLeave={() => setHovered(null)}
             active={hovered === "rescue"}
@@ -39,7 +43,8 @@ export default function Index() {
   );
 }
 
-function HeroPanel({ image, label, to, onEnter, onLeave, active }: { image: string; label: string; to: string; onEnter: () => void; onLeave: () => void; active: boolean }) {
+function HeroPanel({ image, label, to, onEnter, onLeave, active, isAuthenticated }: { image: string; label: string; to: string; onEnter: () => void; onLeave: () => void; active: boolean; isAuthenticated: boolean }) {
+  const href = isAuthenticated ? to : `/signin?next=${encodeURIComponent(to)}`;
   return (
     <div
       className="relative min-h-[300px] md:min-h-[60vh] overflow-hidden"
@@ -50,7 +55,7 @@ function HeroPanel({ image, label, to, onEnter, onLeave, active }: { image: stri
       <div className="absolute inset-0 bg-black/40" />
         <div className="relative z-10 h-full w-full flex items-center justify-center">
         <Link
-          to={to.startsWith("/user") ? "/signin?next=/user" : to.startsWith("/rescue") ? "/signin?next=/rescue" : to}
+          to={href}
           className="rounded-full bg-white px-7 py-4 text-base font-semibold shadow-xl hover:scale-[1.03] active:scale-[0.98] transition-transform"
         >
           {label}

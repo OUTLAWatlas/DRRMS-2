@@ -24,6 +24,10 @@ export default defineConfig(({ mode }) => ({
       "@shared": path.resolve(__dirname, "./shared"),
     },
   },
+  test: {
+    environment: "happy-dom",
+    setupFiles: "./vitest.setup.ts",
+  },
 }));
 
 function expressPlugin(): Plugin {

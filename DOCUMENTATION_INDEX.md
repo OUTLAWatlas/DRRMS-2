@@ -16,6 +16,7 @@ This repository contains extensive documentation to help you understand, develop
 | **[CODEBASE_DOCUMENTATION.md](CODEBASE_DOCUMENTATION.md)** | Complete code reference | Understanding the entire codebase |
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | Technical architecture | System design, advanced developers |
 | **[FEATURE_ROADMAP.md](FEATURE_ROADMAP.md)** | Features & API specs | Planning, API integration |
+| **[Predictive Allocation Plan](docs/predictive-allocation.md)** | Data + service scope for AI allocation | AI/ML feature owners |
 | **[Readme.md](Readme.md)** | Project overview | Understanding project goals |
 
 ---
@@ -184,6 +185,24 @@ Browse: **[Readme.md](Readme.md)**
 - Project introduction
 - Understanding goals
 - High-level overview
+
+---
+
+### 6. [Predictive Allocation Plan](docs/predictive-allocation.md)
+**Phase 0 scope for AI-powered resource allocation**
+
+**Contents:**
+1. Objectives & scope
+2. Data/table requirements (feature store, recommendation storage)
+3. Feature engineering pipeline
+4. Forecasting service responsibilities & APIs
+5. Client integration checklist
+6. Sequenced next steps
+
+**Perfect for:**
+- Engineers working on ML integrations
+- Architects planning the predictive roadmap
+- Product leads aligning timeline & dependencies
 
 ---
 
