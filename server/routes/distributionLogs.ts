@@ -34,7 +34,7 @@ router.post("/", authMiddleware, rescuerOnly, async (req: AuthRequest, res) => {
 
       await tx
         .update(resources)
-        .set({ quantity: resource.quantity - payload.quantity, updatedAt: new Date() })
+        .set({ quantity: resource.quantity - payload.quantity, updatedAt: Date.now() })
         .where(eq(resources.id, resource.id));
 
       const [log] = await tx

@@ -27,7 +27,7 @@ router.post("/", authMiddleware, rescuerOnly, requirePermission("warehouses:writ
         name: data.name,
         location: data.location,
         capacity: data.capacity ?? 0,
-        lastAuditedAt: data.lastAuditedAt ? new Date(data.lastAuditedAt) : null,
+        lastAuditedAt: toMillis(data.lastAuditedAt),
         latitude: data.latitude ?? null,
         longitude: data.longitude ?? null,
       })
@@ -68,13 +68,11 @@ router.put("/:id", authMiddleware, rescuerOnly, requirePermission("warehouses:wr
     if (validated.location !== undefined) updatePayload.location = validated.location;
     if (validated.capacity !== undefined) updatePayload.capacity = validated.capacity;
     if (validated.lastAuditedAt !== undefined) {
-      updatePayload.lastAuditedAt = validated.lastAuditedAt
-        ? new Date(validated.lastAuditedAt)
-        : null;
+      updatePayload.lastAuditedAt = toMillis(validated.lastAuditedAt);
     }
     if (validated.latitude !== undefined) updatePayload.latitude = validated.latitude;
     if (validated.longitude !== undefined) updatePayload.longitude = validated.longitude;
-    updatePayload.updatedAt = new Date();
+    updatePayload.updatedAt = Date.now();
 
     if (Object.keys(updatePayload).length === 1 && "updatedAt" in updatePayload) {
       return res.status(400).json({ error: "No updates provided" });
@@ -111,3 +109,9 @@ router.get("/:id/inventory", authMiddleware, requirePermission("warehouses:read"
 });
 
 export default router;
+
+function toMillis(value?: string | number | null) {
+  if (value == null) return null;
+  const parsed = typeof value === "number" ? value : Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}

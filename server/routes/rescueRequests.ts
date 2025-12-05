@@ -89,7 +89,7 @@ router.put("/:id", authMiddleware, rescuerOnly, requirePermission("rescue:update
     const db = getDb();
     const [updated] = await db
       .update(rescueRequests)
-      .set({ status: data.status, updatedAt: new Date() })
+      .set({ status: data.status, updatedAt: Date.now() })
       .where(eq(rescueRequests.id, id))
       .returning();
     if (!updated) return res.status(404).json({ error: "Rescue request not found" });

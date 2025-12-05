@@ -66,7 +66,7 @@ const App = () => (
               <Route
                 path="/rescue"
                 element={
-                  <RequireAuth allowedRoles={["rescuer"]}>
+                  <RequireAuth allowedRoles={["rescuer", "admin"]}>
                     <RescuePortal />
                   </RequireAuth>
                 }

@@ -33,12 +33,12 @@ router.get("/demand-insights", authMiddleware, rescuerOnly, async (req, res) => 
   const bucketWindow = Number.isFinite(bucketsParam)
     ? Math.min(Math.max(1, Math.trunc(bucketsParam)), MAX_BUCKET_LOOKBACK)
     : DEFAULT_BUCKET_LOOKBACK;
-  const since = new Date(Date.now() - bucketWindow * SNAPSHOT_BUCKET_MS * 2);
+  const sinceMs = Date.now() - bucketWindow * SNAPSHOT_BUCKET_MS * 2;
 
   const snapshots = await db
     .select()
     .from(demandFeatureSnapshots)
-    .where(gte(demandFeatureSnapshots.bucketStart, since))
+    .where(gte(demandFeatureSnapshots.bucketStart, sinceMs))
     .orderBy(desc(demandFeatureSnapshots.bucketStart));
 
   if (!snapshots.length) {
@@ -46,8 +46,8 @@ router.get("/demand-insights", authMiddleware, rescuerOnly, async (req, res) => 
     return res.json(empty);
   }
 
-  const latestBucketStart = snapshots[0]!.bucketStart.getTime();
-  const latestRows = snapshots.filter((row) => row.bucketStart.getTime() === latestBucketStart);
+  const latestBucketStart = Number(snapshots[0]!.bucketStart);
+  const latestRows = snapshots.filter((row) => Number(row.bucketStart) === latestBucketStart);
 
   const heatmap = latestRows.map((row) => ({
     region: row.region,
@@ -61,7 +61,7 @@ router.get("/demand-insights", authMiddleware, rescuerOnly, async (req, res) => 
 
   const bucketMap = new Map<number, { pressureSum: number; count: number; waits: number[] }>();
   for (const row of snapshots) {
-    const key = row.bucketStart.getTime();
+    const key = Number(row.bucketStart);
     const entry = bucketMap.get(key) ?? { pressureSum: 0, count: 0, waits: [] };
     entry.pressureSum += computeDemandPressure(row.requestCount, row.pendingCount, row.inventoryAvailable);
     entry.count += 1;
@@ -182,7 +182,7 @@ router.post(
     await db.transaction(async (tx) => {
       await tx
         .update(predictiveRecommendations)
-        .set({ status: body.action, updatedAt: new Date() })
+        .set({ status: body.action, updatedAt: Date.now() })
         .where(eq(predictiveRecommendations.id, recommendationId));
 
       await tx.insert(predictiveFeedback).values({
@@ -231,8 +231,11 @@ function toNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function toMillis(value: Date | null | undefined) {
-  return value instanceof Date ? value.getTime() : null;
+function toMillis(value: Date | number | null | undefined) {
+  if (value == null) return null;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  return null;
 }
 
 function computeDemandPressure(requestCount: number, pendingCount: number, inventoryAvailable?: number | null) {

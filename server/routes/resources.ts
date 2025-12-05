@@ -71,7 +71,7 @@ router.put("/:id", authMiddleware, rescuerOnly, requirePermission("resources:wri
     const db = getDb();
     const [updatedResource] = await db
       .update(resources)
-      .set({ ...validatedData, updatedAt: new Date() })
+      .set({ ...validatedData, updatedAt: Date.now() })
       .where(eq(resources.id, id))
       .returning();
 

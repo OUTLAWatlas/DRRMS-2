@@ -33,7 +33,7 @@ router.post("/", authMiddleware, rescuerOnly, async (req: AuthRequest, res) => {
 
       await tx
         .update(resources)
-        .set({ quantity: source.quantity - payload.quantity, updatedAt: new Date() })
+        .set({ quantity: source.quantity - payload.quantity, updatedAt: Date.now() })
         .where(eq(resources.id, source.id));
 
       const existingTarget = await tx
@@ -46,7 +46,7 @@ router.post("/", authMiddleware, rescuerOnly, async (req: AuthRequest, res) => {
         const target = existingTarget[0];
         await tx
           .update(resources)
-          .set({ quantity: target.quantity + payload.quantity, updatedAt: new Date() })
+          .set({ quantity: target.quantity + payload.quantity, updatedAt: Date.now() })
           .where(eq(resources.id, target.id));
       } else {
         await tx.insert(resources).values({

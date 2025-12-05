@@ -23,7 +23,7 @@ router.post("/", authMiddleware, requirePermission("reports:create"), async (req
         whatHappened: encryptField(data.whatHappened),
         location: encryptField(data.location),
         severity: data.severity,
-        occurredAt: data.occurredAt ? new Date(data.occurredAt) : undefined,
+        occurredAt: parseDateInput(data.occurredAt),
         userId: req.user?.userId,
         latitude: data.latitude,
         longitude: data.longitude,
@@ -74,8 +74,8 @@ router.put("/:id", authMiddleware, rescuerOnly, requirePermission("reports:updat
       .update(disasterReports)
       .set({
         ...validatedData,
-        occurredAt: validatedData.occurredAt ? new Date(validatedData.occurredAt) : undefined,
-        updatedAt: new Date(),
+        occurredAt: parseDateInput(validatedData.occurredAt),
+        updatedAt: Date.now(),
         whatHappened: validatedData.whatHappened ? encryptField(validatedData.whatHappened) : undefined,
         location: validatedData.location ? encryptField(validatedData.location) : undefined,
       })
@@ -121,4 +121,10 @@ function deserializeReport(report: typeof disasterReports.$inferSelect) {
     whatHappened: decryptField(report.whatHappened),
     location: decryptField(report.location),
   };
+}
+
+function parseDateInput(value?: string | null) {
+  if (!value) return undefined;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }

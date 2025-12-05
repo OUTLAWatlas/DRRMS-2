@@ -151,13 +151,14 @@ router.post("/recalculate", authMiddleware, rescuerOnly, async (_req, res) => {
     warehouseInventory,
   };
 
-  const now = new Date();
+  const nowMs = Date.now();
+  const nowDate = new Date(nowMs);
   await db.transaction(async (tx) => {
     for (const request of openRequests) {
-      const evaluation = evaluateRequestPriority(request, resourcePool, context, now);
+      const evaluation = evaluateRequestPriority(request, resourcePool, context, nowDate);
       await tx
         .update(rescueRequests)
-        .set({ criticalityScore: evaluation.score, lastScoredAt: now })
+        .set({ criticalityScore: evaluation.score, lastScoredAt: nowMs })
         .where(eq(rescueRequests.id, request.id));
 
       await tx.insert(requestPrioritySnapshots).values({
@@ -202,7 +203,7 @@ router.post("/recalculate", authMiddleware, rescuerOnly, async (_req, res) => {
     }
   });
 
-  res.json({ updated: openRequests.length, recalculatedAt: now.getTime() });
+  res.json({ updated: openRequests.length, recalculatedAt: nowMs });
 });
 
 router.post("/recommendations/:id/apply", authMiddleware, rescuerOnly, async (req: AuthRequest, res) => {
@@ -240,7 +241,7 @@ router.post("/recommendations/:id/apply", authMiddleware, rescuerOnly, async (re
     return res.status(400).json({ error: "Insufficient stock to apply recommendation" });
   }
 
-  const now = new Date();
+  const timestampMs = Date.now();
   let allocationRecord = null;
   await db.transaction(async (tx) => {
     const [allocation] = await tx
@@ -280,7 +281,7 @@ router.post("/recommendations/:id/apply", authMiddleware, rescuerOnly, async (re
 
     await tx
       .update(rescueRequests)
-      .set({ status: "in_progress", updatedAt: now })
+      .set({ status: "in_progress", updatedAt: timestampMs })
       .where(eq(rescueRequests.id, recommendation.requestId));
   });
 
