@@ -5,21 +5,23 @@ import { authMiddleware, AuthRequest, rescuerOnly } from "../middleware/auth";
 import { eq, desc } from "drizzle-orm";
 import { z } from "zod";
 import { createReportSchema, updateReportSchema } from "../../shared/api";
+import { decryptField, encryptField } from "../security/encryption";
+import { requirePermission } from "../security/permissions";
 
 const router = Router();
 
 const reportSchema = createReportSchema;
 
 // POST /api/reports - Create
-router.post("/", authMiddleware, async (req: AuthRequest, res) => {
+router.post("/", authMiddleware, requirePermission("reports:create"), async (req: AuthRequest, res) => {
   try {
     const data = reportSchema.parse(req.body);
     const db = getDb();
     const [report] = await db
       .insert(disasterReports)
       .values({
-        whatHappened: data.whatHappened,
-        location: data.location,
+        whatHappened: encryptField(data.whatHappened),
+        location: encryptField(data.location),
         severity: data.severity,
         occurredAt: data.occurredAt ? new Date(data.occurredAt) : undefined,
         userId: req.user?.userId,
@@ -27,7 +29,7 @@ router.post("/", authMiddleware, async (req: AuthRequest, res) => {
         longitude: data.longitude,
       })
       .returning();
-    res.status(201).json(report);
+    res.status(201).json(deserializeReport(report));
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: "Invalid report data", details: error.errors });
@@ -37,10 +39,10 @@ router.post("/", authMiddleware, async (req: AuthRequest, res) => {
 });
 
 // GET /api/reports - List all (Rescuers only)
-router.get("/", authMiddleware, rescuerOnly, async (_req, res) => {
+router.get("/", authMiddleware, rescuerOnly, requirePermission("reports:read"), async (_req, res) => {
   const db = getDb();
   const all = await db.select().from(disasterReports).orderBy(desc(disasterReports.createdAt));
-  res.json(all);
+  res.json(all.map(deserializeReport));
 });
 
 // GET /api/reports/:id - Get single
@@ -52,14 +54,14 @@ router.get("/:id", authMiddleware, async (req: AuthRequest, res) => {
   const rows = await db.select().from(disasterReports).where(eq(disasterReports.id, id));
     const report = rows[0];
     if (!report) return res.status(404).json({ error: "Report not found" });
-    res.json(report);
+    res.json(deserializeReport(report));
   } catch (_e) {
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
 // PUT /api/reports/:id - Update report (Rescuers only)
-router.put("/:id", authMiddleware, rescuerOnly, async (req, res) => {
+router.put("/:id", authMiddleware, rescuerOnly, requirePermission("reports:update"), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
@@ -74,6 +76,8 @@ router.put("/:id", authMiddleware, rescuerOnly, async (req, res) => {
         ...validatedData,
         occurredAt: validatedData.occurredAt ? new Date(validatedData.occurredAt) : undefined,
         updatedAt: new Date(),
+        whatHappened: validatedData.whatHappened ? encryptField(validatedData.whatHappened) : undefined,
+        location: validatedData.location ? encryptField(validatedData.location) : undefined,
       })
       .where(eq(disasterReports.id, id))
       .returning();
@@ -81,7 +85,7 @@ router.put("/:id", authMiddleware, rescuerOnly, async (req, res) => {
     if (!updated) {
       return res.status(404).json({ error: "Report not found" });
     }
-    res.json(updated);
+    res.json(deserializeReport(updated));
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: "Invalid update data", details: error.errors });
@@ -91,7 +95,7 @@ router.put("/:id", authMiddleware, rescuerOnly, async (req, res) => {
 });
 
 // DELETE /api/reports/:id - Delete report (Rescuers only)
-router.delete("/:id", authMiddleware, rescuerOnly, async (req, res) => {
+router.delete("/:id", authMiddleware, rescuerOnly, requirePermission("reports:delete"), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
@@ -110,3 +114,11 @@ router.delete("/:id", authMiddleware, rescuerOnly, async (req, res) => {
 });
 
 export default router;
+
+function deserializeReport(report: typeof disasterReports.$inferSelect) {
+  return {
+    ...report,
+    whatHappened: decryptField(report.whatHappened),
+    location: decryptField(report.location),
+  };
+}

@@ -29,6 +29,7 @@
     "typecheck": "tsc"
   },
   "dependencies": {
+    "otplib": "^12.0.1",
     "bcryptjs": "^3.0.2",
     "dotenv": "^17.2.1",
     "drizzle-orm": "^0.44.7",

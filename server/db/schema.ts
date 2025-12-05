@@ -10,6 +10,10 @@ export const users = pgTable(
     name: text("name").notNull(),
     email: text("email").notNull(),
     passwordHash: text("password_hash").notNull(),
+    mfaSecret: text("mfa_secret"),
+    mfaEnabled: boolean("mfa_enabled").notNull().default(false),
+    mfaRecoveryCodes: text("mfa_recovery_codes"),
+    lastMfaVerifiedAt: bigint("last_mfa_verified_at", { mode: "number" }),
     role: text("role")
       .$type<"survivor" | "rescuer" | "admin">()
       .notNull()
@@ -49,6 +53,7 @@ export const rescueRequests = pgTable("rescue_requests", {
   userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
   location: text("location").notNull(),
   details: text("details").notNull(),
+  detailsDigest: text("details_digest"),
   peopleCount: integer("people_count"),
   priority: text("priority")
     .$type<"low" | "medium" | "high">()
@@ -304,6 +309,25 @@ export const demandFeatureSnapshots = pgTable(
       table.region,
       table.resourceType,
     ),
+  }),
+);
+
+export const transparencyReports = pgTable(
+  "transparency_reports",
+  {
+    id: serial("id").primaryKey(),
+    bucketStart: bigint("bucket_start", { mode: "number" }).notNull(),
+    bucketEnd: bigint("bucket_end", { mode: "number" }).notNull(),
+    generatedAt: bigint("generated_at", { mode: "number" }).notNull().default(nowMs),
+    payload: text("payload").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    signature: text("signature"),
+    createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+    status: text("status").notNull().default("sealed"),
+    metadata: text("metadata"),
+  },
+  (table) => ({
+    bucketIdx: uniqueIndex("transparency_reports_bucket_idx").on(table.bucketStart),
   }),
 );
 

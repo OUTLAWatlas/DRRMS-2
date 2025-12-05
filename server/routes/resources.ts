@@ -5,18 +5,19 @@ import { authMiddleware, rescuerOnly } from "../middleware/auth";
 import { eq, desc } from "drizzle-orm";
 import { z } from "zod";
 import { updateResourceSchema, createResourceSchema } from "../../shared/api";
+import { requirePermission } from "../security/permissions";
 
 const router = Router();
 
 // GET /api/resources - List all resources (Rescuers only)
-router.get("/", authMiddleware, rescuerOnly, async (_req, res) => {
+router.get("/", authMiddleware, rescuerOnly, requirePermission("resources:read"), async (_req, res) => {
   const db = getDb();
   const allResources = await db.select().from(resources).orderBy(desc(resources.updatedAt));
   res.json(allResources);
 });
 
 // GET /api/resources/:id - Get single resource (Rescuers only)
-router.get("/:id", authMiddleware, rescuerOnly, async (req, res) => {
+router.get("/:id", authMiddleware, rescuerOnly, requirePermission("resources:read"), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
@@ -35,7 +36,7 @@ router.get("/:id", authMiddleware, rescuerOnly, async (req, res) => {
 });
 
 // POST /api/resources - Add resource (Rescuers only)
-router.post("/", authMiddleware, rescuerOnly, async (req, res) => {
+router.post("/", authMiddleware, rescuerOnly, requirePermission("resources:write"), async (req, res) => {
   try {
     const validatedData = createResourceSchema.parse(req.body);
     const db = getDb();
@@ -59,7 +60,7 @@ router.post("/", authMiddleware, rescuerOnly, async (req, res) => {
 });
 
 // PUT /api/resources/:id - Update resource (Rescuers only)
-router.put("/:id", authMiddleware, rescuerOnly, async (req, res) => {
+router.put("/:id", authMiddleware, rescuerOnly, requirePermission("resources:write"), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
@@ -87,7 +88,7 @@ router.put("/:id", authMiddleware, rescuerOnly, async (req, res) => {
 });
 
 // DELETE /api/resources/:id - Delete resource (Rescuers only)
-router.delete("/:id", authMiddleware, rescuerOnly, async (req, res) => {
+router.delete("/:id", authMiddleware, rescuerOnly, requirePermission("resources:write"), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {

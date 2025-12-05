@@ -34,6 +34,12 @@ const schedulerDefinitions: SchedulerDefinition[] = [
     description: "Pulls weather + government alert feeds",
     expectedIntervalMs: readInterval(process.env.LIVE_FEED_REFRESH_INTERVAL_MS, 5 * 60 * 1000),
   },
+  {
+    name: "transparency_reporter",
+    label: "Transparency reporter",
+    description: "Seals immutable audit summaries for compliance",
+    expectedIntervalMs: readInterval(process.env.TRANSPARENCY_REPORT_INTERVAL_MS, 60 * 60 * 1000),
+  },
 ];
 
 type RecordPayload = {

@@ -5,18 +5,19 @@ import { authMiddleware, rescuerOnly } from "../middleware/auth";
 import { eq, desc } from "drizzle-orm";
 import { createWarehouseSchema, updateWarehouseSchema } from "../../shared/api";
 import { z } from "zod";
+import { requirePermission } from "../security/permissions";
 
 const router = Router();
 
 // GET /api/warehouses - List all
-router.get("/", authMiddleware, async (_req, res) => {
+router.get("/", authMiddleware, requirePermission("warehouses:read"), async (_req, res) => {
   const db = getDb();
   const all = await db.select().from(warehouses).orderBy(desc(warehouses.createdAt));
   res.json(all);
 });
 
 // POST /api/warehouses - Create warehouse
-router.post("/", authMiddleware, rescuerOnly, async (req, res) => {
+router.post("/", authMiddleware, rescuerOnly, requirePermission("warehouses:write"), async (req, res) => {
   try {
     const data = createWarehouseSchema.parse(req.body);
     const db = getDb();
@@ -41,7 +42,7 @@ router.post("/", authMiddleware, rescuerOnly, async (req, res) => {
 });
 
 // GET /api/warehouses/:id - Get warehouse details
-router.get("/:id", authMiddleware, async (req, res) => {
+router.get("/:id", authMiddleware, requirePermission("warehouses:read"), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid warehouse ID" });
@@ -56,7 +57,7 @@ router.get("/:id", authMiddleware, async (req, res) => {
 });
 
 // PUT /api/warehouses/:id - Update warehouse metadata
-router.put("/:id", authMiddleware, rescuerOnly, async (req, res) => {
+router.put("/:id", authMiddleware, rescuerOnly, requirePermission("warehouses:write"), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid warehouse ID" });
@@ -97,7 +98,7 @@ router.put("/:id", authMiddleware, rescuerOnly, async (req, res) => {
 });
 
 // GET /api/warehouses/:id/inventory - Get inventory
-router.get("/:id/inventory", authMiddleware, async (req, res) => {
+router.get("/:id/inventory", authMiddleware, requirePermission("warehouses:read"), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid warehouse ID" });

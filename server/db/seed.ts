@@ -13,6 +13,8 @@ import {
   users,
   warehouses,
 } from "./schema";
+import { encryptField } from "../security/encryption";
+import { hashSensitiveValue } from "../security/hash";
 
 process.on("uncaughtException", (err) => {
   console.error("Uncaught exception during seeding:", err);
@@ -582,10 +584,11 @@ async function seedRescueRequests(
   console.log(`Upserting ${seeds.length} rescue requests...`);
   const now = Date.now();
   for (const request of seeds) {
+    const digest = hashSensitiveValue(request.details);
     const existing = await db
       .select({ id: rescueRequests.id })
       .from(rescueRequests)
-      .where(eq(rescueRequests.details, request.details))
+      .where(eq(rescueRequests.detailsDigest, digest))
       .limit(1);
     if (existing.length > 0) {
       continue;
@@ -598,7 +601,8 @@ async function seedRescueRequests(
     await db.insert(rescueRequests).values({
       userId: requesterId,
       location: request.location,
-      details: request.details,
+      details: encryptField(request.details)!,
+      detailsDigest: digest,
       priority: request.priority,
       status: request.status,
       peopleCount: request.peopleCount,
@@ -619,9 +623,15 @@ async function seedTransactions(
 ) {
   if (!actorUserId || seeds.length === 0) return;
   console.log("Upserting sample transactions...");
-  const requestRows = await db.select({ id: rescueRequests.id, details: rescueRequests.details }).from(rescueRequests);
+  const requestRows = await db
+    .select({ id: rescueRequests.id, digest: rescueRequests.detailsDigest })
+    .from(rescueRequests);
   const requestMap = new Map<string, number>();
-  requestRows.forEach((row) => requestMap.set(row.details as string, row.id as number));
+  requestRows.forEach((row) => {
+    if (row.digest) {
+      requestMap.set(row.digest, row.id as number);
+    }
+  });
 
   for (const entry of seeds) {
     const existing = await db
@@ -631,7 +641,9 @@ async function seedTransactions(
       .limit(1);
     if (existing.length > 0) continue;
 
-    const linkedRequestId = entry.linkedRequestDetail ? requestMap.get(entry.linkedRequestDetail) ?? null : null;
+    const linkedRequestId = entry.linkedRequestDetail
+      ? requestMap.get(hashSensitiveValue(entry.linkedRequestDetail)) ?? null
+      : null;
     const recordedAt = Date.now() - (entry.offsetMinutes ?? 60) * 60 * 1000;
     await db.insert(transactions).values({
       reference: entry.reference,

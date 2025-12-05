@@ -1,8 +1,8 @@
 import type { Request, Response, NextFunction } from "express";
-import jwt from "jsonwebtoken";
 import { users } from "../db/schema";
 import { getDb } from "../db";
 import { eq } from "drizzle-orm";
+import { verifyAuthToken } from "../security/jwt";
 
 export interface AuthUser {
   userId: number;
@@ -13,8 +13,6 @@ export interface AuthRequest extends Request {
   user?: AuthUser;
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
-
 export function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const auth = req.headers.authorization;
@@ -22,7 +20,7 @@ export function authMiddleware(req: AuthRequest, res: Response, next: NextFuncti
       return res.status(401).json({ error: "Unauthorized" });
     }
     const token = auth.slice("Bearer ".length).trim();
-    const payload = jwt.verify(token, JWT_SECRET) as AuthUser;
+    const payload = verifyAuthToken(token);
     if (!payload?.userId || !payload?.role) {
       return res.status(401).json({ error: "Unauthorized" });
     }

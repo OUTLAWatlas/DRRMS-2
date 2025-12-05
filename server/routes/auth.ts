@@ -3,7 +3,6 @@ import { getDb } from "../db";
 import { users } from "../db/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
 import { randomBytes } from "crypto";
 import {
   forgotPasswordSchema,
@@ -11,14 +10,30 @@ import {
   registerSchema,
   updateUserRoleSchema,
   updateUserAccessSchema,
+  mfaVerifySchema,
+  mfaDisableSchema,
 } from "../../shared/api";
 import { adminOnly, authMiddleware, type AuthRequest } from "../middleware/auth";
+import { signAuthToken } from "../security/jwt";
+import {
+  consumeRecoveryCode,
+  decryptMfaSecret,
+  encryptMfaSecret,
+  generateRecoveryCodes,
+  hashRecoveryCodes,
+  issueMfaSetup,
+  verifyMfaToken,
+} from "../security/mfa";
+import { createRateLimiter } from "../middleware/rateLimit";
+import { requirePermission } from "../security/permissions";
 
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
+const loginLimiter = createRateLimiter({ bucketId: "auth:login", rule: { windowMs: 60_000, max: 8 } });
+const registerLimiter = createRateLimiter({ bucketId: "auth:register", rule: { windowMs: 60_000, max: 6 } });
+const forgotLimiter = createRateLimiter({ bucketId: "auth:forgot", rule: { windowMs: 60_000, max: 5 } });
 
 function buildAuthPayload(user: typeof users.$inferSelect) {
-  const token = jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET, { expiresIn: "7d" });
+  const token = signAuthToken({ userId: user.id, role: user.role });
   return {
     token,
     user: {
@@ -28,11 +43,12 @@ function buildAuthPayload(user: typeof users.$inferSelect) {
       role: user.role,
       isApproved: Boolean(user.isApproved),
       isBlocked: Boolean(user.isBlocked),
+        mfaEnabled: Boolean(user.mfaEnabled),
     },
   };
 }
 
-router.post("/register", async (req, res) => {
+router.post("/register", registerLimiter, async (req, res) => {
   try {
     const data = registerSchema.parse(req.body);
     const db = getDb();
@@ -66,7 +82,7 @@ router.post("/register", async (req, res) => {
   }
 });
 
-router.post("/login", async (req, res) => {
+router.post("/login", loginLimiter, async (req, res) => {
   try {
     const data = loginSchema.parse(req.body);
     const db = getDb();
@@ -81,6 +97,30 @@ router.post("/login", async (req, res) => {
     if (user.role === "rescuer" && !user.isApproved) {
       return res.status(403).json({ error: "Your rescuer account is awaiting administrator approval." });
     }
+    if (user.mfaEnabled) {
+      const decryptedSecret = decryptMfaSecret(user.mfaSecret ?? null);
+      const providedToken = data.mfaToken ?? null;
+      const providedRecovery = data.mfaRecoveryCode ?? null;
+      let refreshedRecoveryPayload = user.mfaRecoveryCodes ?? null;
+      let satisfied = false;
+      if (decryptedSecret && providedToken) {
+        satisfied = verifyMfaToken({ secret: decryptedSecret, token: providedToken });
+      }
+      if (!satisfied && providedRecovery) {
+        const result = consumeRecoveryCode({ storedPayload: user.mfaRecoveryCodes, provided: providedRecovery });
+        if (result.ok) {
+          satisfied = true;
+          refreshedRecoveryPayload = result.remaining ?? null;
+        }
+      }
+      if (!satisfied) {
+        return res.status(401).json({ error: "MFA challenge required" });
+      }
+      await db
+        .update(users)
+        .set({ lastMfaVerifiedAt: Date.now(), mfaRecoveryCodes: refreshedRecoveryPayload })
+        .where(eq(users.id, user.id));
+    }
     return res.json(buildAuthPayload(user));
   } catch (e: any) {
     if (e?.issues) return res.status(400).json({ error: "Invalid data", details: e.issues });
@@ -88,7 +128,7 @@ router.post("/login", async (req, res) => {
   }
 });
 
-router.post("/forgot-password", async (req, res) => {
+router.post("/forgot-password", forgotLimiter, async (req, res) => {
   try {
     const { email } = forgotPasswordSchema.parse(req.body);
     const db = getDb();
@@ -110,6 +150,80 @@ router.post("/forgot-password", async (req, res) => {
   }
 });
 
+router.post("/mfa/setup", authMiddleware, requirePermission("rescue:list:own"), async (req: AuthRequest, res) => {
+  try {
+    const db = getDb();
+    const user = await db.select().from(users).where(eq(users.id, req.user!.userId)).get?.();
+    if (!user) return res.status(404).json({ error: "User not found" });
+    const { secret, uri } = issueMfaSetup(user.email ?? `user-${user.id}`);
+    const recoveryCodes = generateRecoveryCodes();
+    await db
+      .update(users)
+      .set({
+        mfaSecret: encryptMfaSecret(secret),
+        mfaEnabled: false,
+        mfaRecoveryCodes: hashRecoveryCodes(recoveryCodes),
+      })
+      .where(eq(users.id, user.id));
+    return res.json({ secret, uri, recoveryCodes });
+  } catch (error) {
+    console.error("mfa setup error", error);
+    return res.status(500).json({ error: "Unable to initialize MFA" });
+  }
+});
+
+router.post("/mfa/verify", authMiddleware, requirePermission("rescue:list:own"), async (req: AuthRequest, res) => {
+  try {
+    const body = mfaVerifySchema.parse(req.body);
+    const db = getDb();
+    const record = await db.select().from(users).where(eq(users.id, req.user!.userId)).get?.();
+    if (!record || !record.mfaSecret) return res.status(400).json({ error: "No MFA secret on file" });
+    const secret = decryptMfaSecret(record.mfaSecret);
+    if (!secret) return res.status(400).json({ error: "Secret unavailable" });
+    const valid = verifyMfaToken({ secret, token: body.token });
+    if (!valid) return res.status(401).json({ error: "Invalid MFA token" });
+    await db
+      .update(users)
+      .set({ mfaEnabled: true, lastMfaVerifiedAt: Date.now() })
+      .where(eq(users.id, record.id));
+    return res.json({ message: "MFA enabled" });
+  } catch (error: any) {
+    if (error?.issues) return res.status(400).json({ error: "Invalid data", details: error.issues });
+    console.error("mfa verify error", error);
+    return res.status(500).json({ error: "Unable to verify MFA" });
+  }
+});
+
+router.post("/mfa/disable", authMiddleware, requirePermission("rescue:list:own"), async (req: AuthRequest, res) => {
+  try {
+    const body = mfaDisableSchema.parse(req.body);
+    const db = getDb();
+    const record = await db.select().from(users).where(eq(users.id, req.user!.userId)).get?.();
+    if (!record?.mfaSecret) {
+      return res.status(200).json({ message: "MFA already disabled" });
+    }
+    const secret = decryptMfaSecret(record.mfaSecret);
+    let ok = false;
+    if (body.token && secret) {
+      ok = verifyMfaToken({ secret, token: body.token });
+    }
+    if (!ok && body.recoveryCode) {
+      const result = consumeRecoveryCode({ storedPayload: record.mfaRecoveryCodes, provided: body.recoveryCode });
+      ok = result.ok;
+    }
+    if (!ok) return res.status(401).json({ error: "MFA challenge required" });
+    await db
+      .update(users)
+      .set({ mfaEnabled: false, mfaSecret: null, mfaRecoveryCodes: null, lastMfaVerifiedAt: null })
+      .where(eq(users.id, record.id));
+    return res.json({ message: "MFA disabled" });
+  } catch (error: any) {
+    if (error?.issues) return res.status(400).json({ error: "Invalid data", details: error.issues });
+    console.error("mfa disable error", error);
+    return res.status(500).json({ error: "Unable to disable MFA" });
+  }
+});
+
 router.get("/me", authMiddleware, async (req, res) => {
   try {
     // @ts-ignore - authMiddleware attaches user
@@ -118,7 +232,7 @@ router.get("/me", authMiddleware, async (req, res) => {
     const db = getDb();
     const u = await db.select().from(users).where(eq(users.id, userId)).get?.();
     if (!u) return res.status(404).json({ error: "Not found" });
-    return res.json({ id: u.id, name: u.name, email: u.email, role: u.role, isApproved: Boolean(u.isApproved) });
+    return res.json({ ...serializeUser(u), createdAt: u.createdAt, updatedAt: u.updatedAt });
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: "Internal server error" });
@@ -163,14 +277,7 @@ router.post("/approve/:id", authMiddleware, adminOnly, async (req, res) => {
     }
     return res.json({
       message: "Rescuer approved",
-      user: {
-        id: updated[0].id,
-        name: updated[0].name,
-        email: updated[0].email,
-        role: updated[0].role,
-        isApproved: Boolean(updated[0].isApproved),
-        isBlocked: Boolean(updated[0].isBlocked),
-      },
+      user: serializeUser(updated[0]),
     });
   } catch (e) {
     console.error("approve rescuer error", e);
@@ -197,9 +304,9 @@ router.get("/responders", authMiddleware, adminOnly, async (_req, res) => {
       .orderBy(users.createdAt);
     return res.json(
       responders.map((user) => ({
-        ...user,
-        isApproved: Boolean(user.isApproved),
-        isBlocked: Boolean(user.isBlocked),
+        ...serializeUser(user),
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
       })),
     );
   } catch (e) {
@@ -225,14 +332,7 @@ router.post("/users/:id/role", authMiddleware, adminOnly, async (req, res) => {
     if (existing.role === payload.role) {
       return res.json({
         message: "Role already set",
-        user: {
-          id: existing.id,
-          name: existing.name,
-          email: existing.email,
-          role: existing.role,
-          isApproved: Boolean(existing.isApproved),
-          isBlocked: Boolean(existing.isBlocked),
-        },
+        user: serializeUser(existing),
       });
     }
 
@@ -254,11 +354,7 @@ router.post("/users/:id/role", authMiddleware, adminOnly, async (req, res) => {
 
     return res.json({
       message: `Role updated to ${payload.role}`,
-      user: {
-        ...updated[0],
-        isApproved: Boolean(updated[0].isApproved),
-        isBlocked: Boolean(updated[0].isBlocked),
-      },
+      user: serializeUser(updated[0]),
     });
   } catch (e: any) {
     if (e?.issues) return res.status(400).json({ error: "Invalid data", details: e.issues });
@@ -299,11 +395,7 @@ router.post("/users/:id/access", authMiddleware, adminOnly, async (req: AuthRequ
 
     return res.json({
       message: payload.blocked ? "User access blocked" : "User access restored",
-      user: {
-        ...updated,
-        isApproved: Boolean(updated.isApproved),
-        isBlocked: Boolean(updated.isBlocked),
-      },
+      user: serializeUser(updated),
     });
   } catch (e: any) {
     if (e?.issues) return res.status(400).json({ error: "Invalid data", details: e.issues });
@@ -313,3 +405,15 @@ router.post("/users/:id/access", authMiddleware, adminOnly, async (req: AuthRequ
 });
 
 export default router;
+
+function serializeUser(user: typeof users.$inferSelect) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    isApproved: Boolean(user.isApproved),
+    isBlocked: Boolean(user.isBlocked),
+    mfaEnabled: Boolean(user.mfaEnabled),
+  };
+}

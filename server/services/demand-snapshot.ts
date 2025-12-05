@@ -9,6 +9,7 @@ import {
   warehouses,
 } from "../db/schema";
 import { buildStatsKey, inferResourceType, normalizeRegion } from "./predictive-utils";
+import { decryptField } from "../security/encryption";
 
 const SNAPSHOT_INTERVAL_MINUTES = Number(process.env.DEMAND_SNAPSHOT_BUCKET_MINUTES ?? 30);
 const SNAPSHOT_INTERVAL_MS = Math.max(5, SNAPSHOT_INTERVAL_MINUTES || 30) * 60 * 1000;
@@ -39,7 +40,8 @@ export async function generateDemandFeatureSnapshot(now = new Date()) {
 
   for (const request of recentRequests) {
     const region = normalizeRegion(request.location);
-    const resourceType = inferResourceType(request.details ?? "").toLowerCase();
+    const details = decryptField(request.details) ?? "";
+    const resourceType = inferResourceType(details).toLowerCase();
     const metric = ensureMetric(metrics, region, resourceType);
     metric.requestCount += 1;
     metric.sampleCount += 1;
@@ -61,7 +63,8 @@ export async function generateDemandFeatureSnapshot(now = new Date()) {
 
   for (const request of activeRequests) {
     const region = normalizeRegion(request.location);
-    const resourceType = inferResourceType(request.details ?? "").toLowerCase();
+    const details = decryptField(request.details) ?? "";
+    const resourceType = inferResourceType(details).toLowerCase();
     const metric = ensureMetric(metrics, region, resourceType);
     if (request.status === "pending") metric.pendingCount += 1;
     if (request.status === "in_progress") metric.inProgressCount += 1;
@@ -103,7 +106,8 @@ export async function generateDemandFeatureSnapshot(now = new Date()) {
 
   for (const entry of updatedRequests) {
     const region = normalizeRegion(entry.location);
-    const resourceType = inferResourceType(entry.details ?? "").toLowerCase();
+    const details = decryptField(entry.details) ?? "";
+    const resourceType = inferResourceType(details).toLowerCase();
     const metric = ensureMetric(metrics, region, resourceType);
     const updatedAtMs = normalizeTimestamp(entry.updatedAt);
     const createdAtMs = normalizeTimestamp(entry.createdAt);

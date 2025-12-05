@@ -26,6 +26,8 @@ export const registerSchema = z.object({
 export const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
+  mfaToken: z.string().length(6).optional(),
+  mfaRecoveryCode: z.string().min(6).max(32).optional(),
 });
 
 export const forgotPasswordSchema = z.object({
@@ -39,6 +41,20 @@ export const updateUserRoleSchema = z.object({
 export const updateUserAccessSchema = z.object({
   blocked: z.boolean(),
 });
+
+export const mfaVerifySchema = z.object({
+  token: z.string().length(6),
+});
+
+export const mfaDisableSchema = z
+  .object({
+    token: z.string().length(6).optional(),
+    recoveryCode: z.string().min(6).max(32).optional(),
+  })
+  .refine((data) => Boolean(data.token || data.recoveryCode), {
+    message: "Token or recovery code required",
+    path: ["token"],
+  });
 
 export const createTransactionSchema = z.object({
   reference: z.string().min(1),
@@ -169,6 +185,8 @@ export type LoginInput = z.infer<typeof loginSchema>;
 export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 export type UpdateUserRoleInput = z.infer<typeof updateUserRoleSchema>;
 export type UpdateUserAccessInput = z.infer<typeof updateUserAccessSchema>;
+export type MfaVerifyInput = z.infer<typeof mfaVerifySchema>;
+export type MfaDisableInput = z.infer<typeof mfaDisableSchema>;
 export type CreateTransactionInput = z.infer<typeof createTransactionSchema>;
 export type CreateReportInput = z.infer<typeof createReportSchema>;
 export type UpdateReportInput = z.infer<typeof updateReportSchema>;
@@ -196,6 +214,7 @@ export type User = {
   role: "survivor" | "rescuer" | "admin";
   isApproved: boolean;
   isBlocked: boolean;
+  mfaEnabled: boolean;
   createdAt: number;
   updatedAt: number;
 };
@@ -672,7 +691,11 @@ export type DemandInsightsResponse = {
   timeline: DemandTimelinePoint[];
 };
 
-export type SchedulerName = "demand_snapshotter" | "predictive_allocation" | "live_feed_refresh";
+export type SchedulerName =
+  | "demand_snapshotter"
+  | "predictive_allocation"
+  | "live_feed_refresh"
+  | "transparency_reporter";
 
 export type SchedulerHealthStatus = "healthy" | "warning" | "critical";
 
@@ -697,4 +720,47 @@ export type SchedulersHealthResponse = {
   ok: boolean;
   generatedAt: number;
   schedulers: SchedulerHealthRecord[];
+};
+
+export type TransparencyReportPayload = {
+  generatedAt: number;
+  windowStart: number;
+  bucketStart: number;
+  bucketEnd: number;
+  totals: {
+    rescueRequests: number;
+    disasterReports: number;
+    warehouses: number;
+    resources: number;
+  };
+  activity24h: {
+    newRequests: number;
+    newReports: number;
+    incomeCents: number;
+    expenseCents: number;
+  };
+  status: {
+    pending: number;
+    inProgress: number;
+    fulfilled: number;
+  };
+  governance: {
+    pendingApprovals: number;
+    blockedUsers: number;
+  };
+  chain: {
+    previousHash: string | null;
+  };
+};
+
+export type TransparencyReportRecord = {
+  id: number;
+  bucketStart: number;
+  bucketEnd: number;
+  generatedAt: number;
+  payload: TransparencyReportPayload | null;
+  payloadHash: string;
+  signature: string | null;
+  status: string;
+  metadata: string | null;
 };
