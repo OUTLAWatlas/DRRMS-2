@@ -1,10 +1,21 @@
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
+import { ProviderHealthSection } from "@/components/provider-health/ProviderHealthSection";
+import { DebouncedSearchInput } from "@/components/filters/SearchInput";
+import { StatusPills, type StatusOption } from "@/components/filters/StatusPills";
+import { WarehouseFilterSelect } from "@/components/filters/WarehouseFilterSelect";
 import { DemandHeatmapGrid, DemandTrendChart } from "@/components/DemandSignals";
+import { useZodForm } from "@/hooks/use-zod-form";
+import { useListParams } from "@/hooks/use-list-params";
+import { useProviderHealthFeed } from "@/hooks/use-provider-health";
 import {
   useLiveWeatherQuery,
   useGovernmentAlertsQuery,
@@ -15,103 +26,411 @@ import {
   useUpdateRescueRequestMutation,
   useCreateDistributionLogMutation,
   useUpdateResourceMutation,
+  useRescueBacklog,
+  useWarehouseInventorySummary,
+  useGetLowStockResourcesQuery,
+  useCreateResourceTransferMutation,
+  useGetDistributionLogsQuery,
 } from "@/hooks/api-hooks";
-import type { GovernmentAlert, RescueRequest, Resource, Warehouse } from "@shared/api";
-import { AlertTriangle } from "lucide-react";
+import {
+  distributionLogFormSchema,
+  resourceTransferFormSchema,
+  type GovernmentAlert,
+  type RescueRequest,
+  type Resource,
+  type PaginatedRescueRequestsResponse,
+  type Warehouse,
+} from "@shared/api";
+import { AlertTriangle, X } from "lucide-react";
+import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 
 type NotificationEntry = { id: string; message: string; area?: string; createdAt: number };
 
-const CITY_RADIUS_KM = 45;
-const NEIGHBOR_RADIUS_KM = 120;
+const DEFAULT_REQUEST_PAGE_SIZE = 50;
+const REQUEST_PAGE_OPTIONS = [25, 50, 100, 200] as const;
+const ANALYTICS_PAGE_LIMIT = 200;
+const SLA_TARGET_MINUTES = 6 * 60;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+const STATUS_FILTER_OPTIONS: readonly StatusOption<RescueRequest["status"] | "all">[] = [
+  { label: "All statuses", value: "all" },
+  { label: "Pending", value: "pending" },
+  { label: "In progress", value: "in_progress" },
+  { label: "Fulfilled", value: "fulfilled" },
+  { label: "Cancelled", value: "cancelled" },
+];
+
 
 export default function RescuePortal() {
   const liveWeather = useLiveWeatherQuery();
   const alerts = useGovernmentAlertsQuery({ limit: 5 });
   const demandInsights = useDemandInsightsQuery({ buckets: 10 });
-  const rescueRequests = useGetRescueRequestsQuery();
-  const resourcesQuery = useGetResourcesQuery();
+  const { params, setParams } = useListParams("rescuePortal", {
+    page: { type: "number", defaultValue: 1 },
+    limit: { type: "number", defaultValue: DEFAULT_REQUEST_PAGE_SIZE },
+    search: { type: "string", defaultValue: "" },
+    status: { type: "string", defaultValue: "all" },
+    priority: { type: "string", defaultValue: "all" },
+    sortBy: { type: "string", defaultValue: "createdAt" },
+    sortDirection: { type: "string", defaultValue: "desc" },
+    warehouseId: { type: "number", defaultValue: 0 },
+  });
+
+  const requestPage = params.page ?? 1;
+  const requestLimit = params.limit ?? DEFAULT_REQUEST_PAGE_SIZE;
+  const rescueSearch = params.search ?? "";
+  const statusFilter = (params.status as RescueRequest["status"] | "all") ?? "all";
+  const priorityFilter = (params.priority as RescueRequest["priority"] | "all") ?? "all";
+  const rescueSortBy = (params.sortBy as "createdAt" | "criticalityScore" | "priority") ?? "createdAt";
+  const rescueSortDirection = (params.sortDirection as "asc" | "desc") ?? "desc";
+  const selectedHubId = params.warehouseId && params.warehouseId > 0 ? params.warehouseId : null;
+
+  const rescueQueryParams = {
+    page: requestPage,
+    limit: requestLimit,
+    status: statusFilter === "all" ? undefined : statusFilter,
+    priority: priorityFilter === "all" ? undefined : priorityFilter,
+    warehouseId: selectedHubId ?? undefined,
+    search: rescueSearch.trim() || undefined,
+    sortBy: rescueSortBy,
+    sortDirection: rescueSortDirection,
+  } as const;
+
+  const analyticsQueryParams = {
+    ...rescueQueryParams,
+    page: 1,
+    limit: Math.max(ANALYTICS_PAGE_LIMIT, requestLimit),
+  } as const;
+
+  const rescueRequests = useGetRescueRequestsQuery(rescueQueryParams);
+  const rescueBacklog = useRescueBacklog(analyticsQueryParams);
+  const requestAnalytics = useGetRescueRequestsQuery(analyticsQueryParams);
+
+  const resourcesQueryParams = { page: 1, limit: 250 } as const;
+  const resourcesQuery = useGetResourcesQuery(resourcesQueryParams);
+  const warehouseInventorySummary = useWarehouseInventorySummary(resourcesQueryParams);
+  const lowStockQuery = useGetLowStockResourcesQuery({
+    warehouseId: selectedHubId ?? undefined,
+    limit: 15,
+    includeDepleted: true,
+  });
   const warehousesQuery = useGetWarehousesQuery();
   const updateRescueRequest = useUpdateRescueRequestMutation();
   const createDistributionLog = useCreateDistributionLogMutation();
   const updateResourceMutation = useUpdateResourceMutation();
+  const createTransfer = useCreateResourceTransferMutation();
+  const distributionLogsQuery = useGetDistributionLogsQuery();
+  const queryClient = useQueryClient();
+  const providerHealth = useProviderHealthFeed();
 
-  const requests = rescueRequests.data ?? [];
-  const openRequests = useMemo(
-    () => requests.filter((r) => r.status === "pending" || r.status === "in_progress"),
-    [requests],
-  );
+  const dispatchForm = useZodForm({
+    schema: distributionLogFormSchema,
+    defaultValues: {
+      resourceId: undefined,
+      warehouseId: undefined,
+      quantity: undefined,
+      destination: "",
+      requestId: undefined,
+      notes: "",
+    },
+  });
+
+  const transferForm = useZodForm({
+    schema: resourceTransferFormSchema,
+    defaultValues: {
+      resourceId: undefined,
+      toWarehouseId: undefined,
+      quantity: undefined,
+      note: "",
+    },
+  });
+
+  const requestPagination = rescueRequests.data?.pagination;
+  const requests = rescueRequests.data?.requests ?? [];
+  const resourceList = resourcesQuery.data?.resources ?? [];
   const warehouses = warehousesQuery.data ?? [];
-  const [selectedHubId, setSelectedHubId] = useState<number | null>(null);
+  const warehouseNameMap = useMemo(() => {
+    const map: Record<number, string> = {};
+    warehouses.forEach((warehouse) => {
+      map[warehouse.id] = warehouse.name;
+    });
+    return map;
+  }, [warehouses]);
   useEffect(() => {
-    if (selectedHubId == null && warehouses.length > 0) {
-      setSelectedHubId(warehouses[0].id);
+    if (!warehouses.length) return;
+    if (selectedHubId && warehouses.every((warehouse) => warehouse.id !== selectedHubId)) {
+      setParams({ warehouseId: warehouses[0].id });
     }
-  }, [selectedHubId, warehouses]);
+  }, [selectedHubId, warehouses, setParams]);
   const selectedWarehouse = useMemo(() => warehouses.find((w) => w.id === selectedHubId) ?? null, [warehouses, selectedHubId]);
-  const filteredRequests = useMemo(
-    () => filterRequestsByHub(openRequests, selectedWarehouse),
-    [openRequests, selectedWarehouse],
+  const visibleRequests = useMemo(() => {
+    let list = [...requests];
+    if (selectedWarehouse) {
+      list = filterRequestsByHub(list, selectedWarehouse);
+    }
+    const effectiveStatus = statusFilter === "all" ? null : statusFilter;
+    if (effectiveStatus) {
+      list = list.filter((request) => request.status === effectiveStatus);
+    }
+    const effectivePriority = priorityFilter === "all" ? null : priorityFilter;
+    if (effectivePriority) {
+      list = list.filter((request) => request.priority === effectivePriority);
+    }
+    const searchTerm = rescueSearch.trim().toLowerCase();
+    if (searchTerm) {
+      list = list.filter((request) => matchesRescueSearch(request, searchTerm));
+    }
+    list.sort((a, b) => compareRescueRequests(a, b, rescueSortBy, rescueSortDirection));
+    return list;
+  }, [
+    requests,
+    selectedWarehouse,
+    statusFilter,
+    priorityFilter,
+    rescueSearch,
+    rescueSortBy,
+    rescueSortDirection,
+  ]);
+  const dispatchableRequests = useMemo(() => visibleRequests.slice(0, 25), [visibleRequests]);
+  const selectedDispatchResourceId = dispatchForm.watch("resourceId");
+  const selectedDispatchResource = useMemo(
+    () => resourceList.find((resource) => resource.id === selectedDispatchResourceId) ?? null,
+    [selectedDispatchResourceId, resourceList],
+  );
+  useEffect(() => {
+    if (!selectedDispatchResourceId) return;
+    if (!selectedDispatchResource) return;
+    dispatchForm.setValue("warehouseId", selectedDispatchResource.warehouseId);
+  }, [selectedDispatchResourceId, selectedDispatchResource, dispatchForm]);
+
+  const selectedDispatchRequestId = dispatchForm.watch("requestId");
+  useEffect(() => {
+    if (!selectedDispatchRequestId) return;
+    const linkedRequest = visibleRequests.find((request) => request.id === selectedDispatchRequestId);
+    if (!linkedRequest?.location) return;
+    if (dispatchForm.getValues("destination")) return;
+    dispatchForm.setValue("destination", linkedRequest.location);
+  }, [selectedDispatchRequestId, visibleRequests, dispatchForm]);
+
+  const selectedTransferResourceId = transferForm.watch("resourceId");
+  const selectedTransferResource = useMemo(
+    () => resourceList.find((resource) => resource.id === selectedTransferResourceId) ?? null,
+    [selectedTransferResourceId, resourceList],
   );
   const activeRequests = useMemo(
-    () => filteredRequests.filter((r) => r.status === "in_progress"),
-    [filteredRequests],
+    () => visibleRequests.filter((r) => r.status === "in_progress"),
+    [visibleRequests],
   );
   const primaryActiveRequest = activeRequests[0] ?? null;
   const pendingRequests = useMemo(
-    () => filteredRequests.filter((r) => r.status === "pending"),
-    [filteredRequests],
+    () => visibleRequests.filter((r) => r.status === "pending"),
+    [visibleRequests],
   );
   const highlightedAlert = useMemo(() => selectHighestSeverityAlert(alerts.data?.alerts ?? []), [alerts.data]);
-  const availableResources = useMemo(
-    () => resourcesQuery.data?.reduce((sum, item) => sum + (item.quantity ?? 0), 0) ?? 0,
-    [resourcesQuery.data],
-  );
+  const backlogSummary = rescueBacklog.data;
   const peopleNeedingHelp = useMemo(
-    () => filteredRequests.reduce((sum, r) => sum + (r.peopleCount ?? 1), 0),
-    [filteredRequests],
+    () => visibleRequests.reduce((sum, request) => sum + Math.max(1, request.peopleCount ?? 1), 0),
+    [visibleRequests],
   );
-  const estimatedResourceDemand = useMemo(
-    () => filteredRequests.reduce((sum, r) => sum + Math.max(1, r.peopleCount ?? 1), 0),
-    [filteredRequests],
+  const estimatedResourceDemand = peopleNeedingHelp;
+  const inventorySummary = warehouseInventorySummary.data;
+  const warehouseInventoryMap = inventorySummary?.warehouses ?? {};
+  const availableResources = inventorySummary?.totalQuantity ?? 0;
+  const warehousesWithInventory = Object.values(warehouseInventoryMap).filter((entry) => entry.totalQuantity > 0).length;
+  const getWarehouseStock = (warehouseId: number) => warehouseInventoryMap[warehouseId]?.totalQuantity ?? 0;
+  const getWarehouseResources = (warehouseId: number) => warehouseInventoryMap[warehouseId]?.resources ?? [];
+  const recentCriticalRequests = backlogSummary?.recentCritical ?? [];
+  const lowStockAlerts = lowStockQuery.data?.resources ?? [];
+  const lowStockTotal = lowStockQuery.data?.meta.total ?? lowStockAlerts.length;
+  const depletedResourceCount = lowStockAlerts.filter((resource) => resource.quantity === 0).length;
+  const topLowStockAlerts = lowStockAlerts.slice(0, 5);
+  const priorityBreakdown = backlogSummary?.priorityBreakdown;
+  const analyticsRequests = requestAnalytics.data?.requests ?? [];
+  const backlogTotalRecords = requestAnalytics.data?.pagination?.total ?? backlogSummary?.totalRequests ?? 0;
+  const burnChartConfig = useMemo<ChartConfig>(
+    () => ({
+      quantity: { label: "Units dispatched", color: "hsl(var(--chart-2))" },
+    }),
+    [],
   );
-  const warehouseInventory = useMemo(() => {
-    const stock = new Map<number, number>();
-    resourcesQuery.data?.forEach((resource) => {
-      stock.set(resource.warehouseId, (stock.get(resource.warehouseId) ?? 0) + (resource.quantity ?? 0));
+  const fulfillmentStats = useMemo(() => {
+    if (!analyticsRequests.length) return null;
+    const fulfilled = analyticsRequests.filter(
+      (request) => request.status === "fulfilled" && request.createdAt && request.updatedAt,
+    );
+    if (!fulfilled.length) return null;
+    const durations = fulfilled
+      .map((request) => Math.max(0, (request.updatedAt ?? request.createdAt) - request.createdAt))
+      .sort((a, b) => a - b);
+    const totalDuration = durations.reduce((sum, value) => sum + value, 0);
+    const targetMs = SLA_TARGET_MINUTES * 60 * 1000;
+    const breachCount = durations.filter((value) => value > targetMs).length;
+    const now = Date.now();
+    const recentCount = fulfilled.filter(
+      (request) => now - (request.updatedAt ?? request.createdAt) <= ONE_DAY_MS,
+    ).length;
+    const medianDuration = calculateMedian(durations);
+    return {
+      medianMinutes: Math.round(medianDuration / 60000),
+      averageMinutes: Math.round(totalDuration / durations.length / 60000),
+      breachRate: breachCount / durations.length,
+      recentCount,
+      sampleSize: fulfilled.length,
+    };
+  }, [analyticsRequests]);
+  const burnDownStats = useMemo(() => {
+    const logs = distributionLogsQuery.data ?? [];
+    if (!logs.length) {
+      return { points: [] as { timestamp: number; label: string; quantity: number }[], last24h: 0, avgDaily: 0 };
+    }
+    const now = Date.now();
+    let last24h = 0;
+    let last7d = 0;
+    const bucketMap = new Map<number, number>();
+    logs.forEach((log) => {
+      const createdAt = log.createdAt ?? 0;
+      if (now - createdAt <= ONE_DAY_MS) {
+        last24h += log.quantity;
+      }
+      if (now - createdAt <= ONE_DAY_MS * 7) {
+        last7d += log.quantity;
+      }
+      const bucket = startOfDayMs(createdAt);
+      bucketMap.set(bucket, (bucketMap.get(bucket) ?? 0) + log.quantity);
     });
-    return stock;
-  }, [resourcesQuery.data]);
-  const resourcesByWarehouse = useMemo(() => {
-    const map = new Map<number, Resource[]>();
-    resourcesQuery.data?.forEach((resource) => {
-      const list = map.get(resource.warehouseId) ?? [];
-      list.push(resource);
-      map.set(resource.warehouseId, list);
+    const points = Array.from(bucketMap.entries())
+      .sort((a, b) => a[0] - b[0])
+      .slice(-7)
+      .map(([timestamp, quantity]) => ({
+        timestamp,
+        label: new Date(timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+        quantity,
+      }));
+    const avgDaily = last7d
+      ? Math.round(last7d / Math.min(7, Math.max(1, bucketMap.size)))
+      : last24h;
+    return { points, last24h, avgDaily };
+  }, [distributionLogsQuery.data]);
+  const burnTrendDelta = burnDownStats.avgDaily
+    ? burnDownStats.last24h - burnDownStats.avgDaily
+    : 0;
+  const backlogCardData = useMemo(
+    () => [
+      {
+        key: "total",
+        title: "Backlog volume",
+        value: backlogTotalRecords,
+        description: backlogSummary
+          ? `${backlogSummary.openRequests} open • ${backlogSummary.fulfilled} fulfilled`
+          : "Waiting for backlog data",
+      },
+      {
+        key: "pending",
+        title: "Pending cases",
+        value: backlogSummary?.pending ?? 0,
+        description: "Awaiting assignment",
+      },
+      {
+        key: "inProgress",
+        title: "Active deployments",
+        value: backlogSummary?.inProgress ?? 0,
+        description: "Teams mobilized",
+      },
+      {
+        key: "fulfilled24h",
+        title: "Fulfilled (24h)",
+        value: fulfillmentStats?.recentCount ?? 0,
+        description: fulfillmentStats?.sampleSize
+          ? `${formatMinutesLabel(fulfillmentStats.medianMinutes ?? null)} median SLA`
+          : "Need more completions",
+      },
+    ],
+    [backlogSummary, backlogTotalRecords, fulfillmentStats],
+  );
+  const cachedStatusBreakdown = useMemo(() => {
+    const snapshot: Record<RescueRequest["status"] | "total", number> = {
+      total: 0,
+      pending: 0,
+      in_progress: 0,
+      fulfilled: 0,
+      cancelled: 0,
+    };
+
+    const cacheEntries = queryClient.getQueriesData({ queryKey: ["rescueRequests", "list"] });
+    cacheEntries.forEach(([, data]) => {
+      if (!data || typeof data !== "object" || !("requests" in data)) return;
+      const typed = data as PaginatedRescueRequestsResponse;
+      typed.requests.forEach((request) => {
+        snapshot.total += 1;
+        snapshot[request.status] += 1;
+      });
     });
-    return map;
-  }, [resourcesQuery.data]);
-  const warehousesWithInventory = useMemo(() => {
-    const ids = new Set<number>();
-    resourcesQuery.data?.forEach((resource) => {
-      if (resource.quantity > 0) ids.add(resource.warehouseId);
-    });
-    return ids.size;
-  }, [resourcesQuery.data]);
+
+    return snapshot;
+  }, [queryClient, rescueRequests.dataUpdatedAt, requestAnalytics.dataUpdatedAt]);
+  const filterChips = useMemo(() => {
+    const chips: { key: string; label: string; onClear: () => void }[] = [];
+    if (statusFilter !== "all") {
+      chips.push({
+        key: "status",
+        label: `Status: ${statusFilter.replace("_", " ")}`,
+        onClear: () => setParams({ status: "all", page: 1 }),
+      });
+    }
+    if (priorityFilter !== "all") {
+      chips.push({
+        key: "priority",
+        label: `Priority: ${priorityFilter}`,
+        onClear: () => setParams({ priority: "all", page: 1 }),
+      });
+    }
+    if (selectedHubId) {
+      chips.push({
+        key: "hub",
+        label: `Hub: ${warehouseNameMap[selectedHubId] ?? `Warehouse ${selectedHubId}`}`,
+        onClear: () => setParams({ warehouseId: 0, page: 1 }),
+      });
+    }
+    if (rescueSearch.trim()) {
+      chips.push({
+        key: "search",
+        label: `Search: “${rescueSearch.trim()}”`,
+        onClear: () => setParams({ search: "", page: 1 }),
+      });
+    }
+    return chips;
+  }, [priorityFilter, rescueSearch, selectedHubId, setParams, statusFilter, warehouseNameMap]);
+
+  const clearAllFilters = () => {
+    setParams({ status: "all", priority: "all", search: "", warehouseId: 0, page: 1 });
+  };
   const defaultDispatchResource = useMemo(
     () =>
-      resourcesQuery.data?.find(
+      resourceList.find(
         (resource) =>
           resource.quantity > 0 && (selectedHubId == null || resource.warehouseId === selectedHubId),
       ) ?? null,
-    [resourcesQuery.data, selectedHubId],
+    [resourceList, selectedHubId],
   );
-  const isDispatching = createDistributionLog.isPending;
+  const isDispatching = createDistributionLog.isPending || dispatchForm.formState.isSubmitting;
   const isRestocking = updateResourceMutation.isPending;
+  const isTransferring = createTransfer.isPending || transferForm.formState.isSubmitting;
 
   const [notifications, setNotifications] = useState<NotificationEntry[]>([]);
   const seenAlertIdsRef = useRef<Set<number>>(new Set());
+  const currentRequestPage = requestPagination?.page ?? requestPage;
+  const totalRequestPages = Math.max(1, requestPagination?.totalPages ?? 1);
+  const canPrevRequests = currentRequestPage > 1;
+  const canNextRequests = currentRequestPage < totalRequestPages;
+
+  useEffect(() => {
+    if (requestPagination?.totalPages && requestPage > requestPagination.totalPages) {
+      setParams({ page: Math.max(1, requestPagination.totalPages) });
+    }
+  }, [requestPage, requestPagination?.totalPages, setParams]);
 
   const handleUpdateRequest = (
     requestId: number,
@@ -129,7 +448,7 @@ export default function RescuePortal() {
   };
 
   const handleRestockResource = (resourceId: number, delta: number) => {
-    const resource = resourcesQuery.data?.find((item) => item.id === resourceId);
+    const resource = resourceList.find((item) => item.id === resourceId);
     if (!resource) {
       toast.error("Resource not found");
       return;
@@ -168,6 +487,39 @@ export default function RescuePortal() {
       },
     );
   };
+
+  const submitDispatchLog = dispatchForm.handleSubmit((values) => {
+    createDistributionLog.mutate(values, {
+      onSuccess: () => {
+        toast.success("Dispatch recorded");
+        dispatchForm.reset();
+      },
+      onError: (error: any) => {
+        const message = error?.message ?? "Unable to record dispatch";
+        toast.error(message);
+        dispatchForm.setError("root", { type: "server", message });
+      },
+    });
+  });
+
+  const submitTransferLog = transferForm.handleSubmit((values) => {
+    const resource = resourceList.find((item) => item.id === values.resourceId);
+    if (resource && resource.warehouseId === values.toWarehouseId) {
+      transferForm.setError("toWarehouseId", { type: "manual", message: "Select a different destination" });
+      return;
+    }
+    createTransfer.mutate(values, {
+      onSuccess: () => {
+        toast.success("Transfer recorded");
+        transferForm.reset();
+      },
+      onError: (error: any) => {
+        const message = error?.message ?? "Unable to record transfer";
+        toast.error(message);
+        transferForm.setError("root", { type: "server", message });
+      },
+    });
+  });
 
   useEffect(() => {
     if (!alerts.data?.alerts?.length) return;
@@ -214,28 +566,240 @@ export default function RescuePortal() {
             </p>
           </div>
           <div className="w-full sm:max-w-sm space-y-2">
-            <Label className="text-xs uppercase tracking-wide">Operational hub</Label>
-            <select
-              className="w-full rounded-md border bg-background p-2 text-sm"
-              value={selectedHubId ?? ""}
-              onChange={(event) => {
-                const { value } = event.target;
-                setSelectedHubId(value ? Number(value) : null);
-              }}
-              disabled={!warehouses.length}
-            >
-              {!warehouses.length && <option value="">No warehouses available</option>}
-              {warehouses.map((warehouse) => (
-                <option key={warehouse.id} value={warehouse.id}>
-                  {warehouse.name}
-                </option>
-              ))}
-            </select>
+            <WarehouseFilterSelect
+              label="Operational hub"
+              value={selectedHubId}
+              onChange={(value) => setParams({ warehouseId: value ?? 0, page: 1 })}
+              warehouses={warehouses}
+              isLoading={warehousesQuery.isLoading}
+            />
             <p className="text-xs text-muted-foreground">
-              Showing requests within ~{NEIGHBOR_RADIUS_KM} km of {selectedWarehouse?.name ?? "the selected hub"}.
+              Requests refresh automatically for {selectedWarehouse?.name ?? "all hubs"}. Apply filters below to narrow
+              the view.
             </p>
           </div>
         </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+          <div className="lg:col-span-2">
+            <DebouncedSearchInput
+              label="Search"
+              placeholder="Keyword or location"
+              value={rescueSearch}
+              onCommit={(value) => setParams({ search: value, page: 1 })}
+            />
+          </div>
+          <div className="lg:col-span-4 space-y-1">
+            <Label className="text-xs uppercase tracking-wide">Status</Label>
+            <StatusPills
+              value={statusFilter}
+              onChange={(value) => setParams({ status: value, page: 1 })}
+              options={STATUS_FILTER_OPTIONS}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs uppercase tracking-wide">Priority</Label>
+            <select
+              className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+              value={priorityFilter}
+              onChange={(event) => setParams({ priority: event.target.value as typeof priorityFilter, page: 1 })}
+            >
+              <option value="all">All priorities</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs uppercase tracking-wide">Sort by</Label>
+            <select
+              className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+              value={rescueSortBy}
+              onChange={(event) => setParams({ sortBy: event.target.value as typeof rescueSortBy, page: 1 })}
+            >
+              <option value="createdAt">Most recent</option>
+              <option value="criticalityScore">Criticality score</option>
+              <option value="priority">Priority</option>
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs uppercase tracking-wide">Direction</Label>
+            <select
+              className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+              value={rescueSortDirection}
+              onChange={(event) => setParams({ sortDirection: event.target.value as typeof rescueSortDirection, page: 1 })}
+            >
+              <option value="desc">Descending</option>
+              <option value="asc">Ascending</option>
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs uppercase tracking-wide">Page size</Label>
+            <select
+              className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+              value={requestLimit}
+              onChange={(event) => setParams({ limit: Number(event.target.value), page: 1 })}
+            >
+              {REQUEST_PAGE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option} per page
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+          <Badge variant="outline">Cached total: {cachedStatusBreakdown.total.toLocaleString()}</Badge>
+          <Badge variant="secondary">Pending: {cachedStatusBreakdown.pending.toLocaleString()}</Badge>
+          <Badge variant="secondary">In progress: {cachedStatusBreakdown.in_progress.toLocaleString()}</Badge>
+          <Badge variant="secondary">Fulfilled: {cachedStatusBreakdown.fulfilled.toLocaleString()}</Badge>
+        </div>
+
+        {filterChips.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            {filterChips.map((chip) => (
+              <Button
+                key={chip.key}
+                size="sm"
+                variant="secondary"
+                className="h-7 rounded-full px-3"
+                onClick={chip.onClear}
+              >
+                <span>{chip.label}</span>
+                <X className="ml-1 h-3 w-3" />
+              </Button>
+            ))}
+            <Button size="sm" variant="ghost" className="h-7" onClick={clearAllFilters}>
+              Reset filters
+            </Button>
+          </div>
+        )}
+
+        <ProviderHealthSection
+          snapshots={providerHealth.snapshots}
+          events={providerHealth.events}
+          streaming={providerHealth.streaming}
+          enabled={providerHealth.enabled}
+          lastUpdatedAt={providerHealth.lastUpdatedAt}
+          error={providerHealth.error}
+          loading={providerHealth.loading}
+        />
+
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {backlogCardData.map((card) => (
+            <Card key={card.key} className="border border-border/60">
+              <CardHeader className="space-y-1">
+                <CardTitle className="text-sm font-semibold text-muted-foreground">{card.title}</CardTitle>
+                <CardDescription>{card.description}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {rescueBacklog.isLoading || requestAnalytics.isLoading ? (
+                  <Skeleton className="h-8 w-24" />
+                ) : (
+                  <p className="text-2xl font-bold text-foreground">{card.value.toLocaleString()}</p>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </section>
+
+        <section className="grid gap-4 lg:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>Fulfillment SLA</CardTitle>
+              <CardDescription>Median completion time for fulfilled requests.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {requestAnalytics.isLoading ? (
+                <Skeleton className="h-28 w-full" />
+              ) : requestAnalytics.error ? (
+                <p className="text-sm text-destructive">Unable to load SLA metrics.</p>
+              ) : fulfillmentStats ? (
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Median</p>
+                    <p className="text-2xl font-bold text-foreground">
+                      {formatMinutesLabel(fulfillmentStats.medianMinutes)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">Based on {fulfillmentStats.sampleSize} records</p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Average</p>
+                    <p className="text-2xl font-bold text-foreground">
+                      {formatMinutesLabel(fulfillmentStats.averageMinutes)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">Rolling lookback</p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">SLA Breach</p>
+                    <p className="text-2xl font-bold text-foreground">
+                      {Math.round((fulfillmentStats.breachRate || 0) * 100)}%
+                    </p>
+                    <p className="text-xs text-muted-foreground">&gt;{SLA_TARGET_MINUTES / 60}h target</p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">No fulfilled requests in this window.</p>
+              )}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Resource burn-down</CardTitle>
+              <CardDescription>Dispatch volume over the last week.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {distributionLogsQuery.isLoading ? (
+                <Skeleton className="h-40 w-full" />
+              ) : distributionLogsQuery.error ? (
+                <p className="text-sm text-destructive">Unable to load burn-down data.</p>
+              ) : burnDownStats.points.length ? (
+                <>
+                  <div className="grid gap-4 sm:grid-cols-3 text-sm">
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Dispatched 24h</p>
+                      <p className="text-2xl font-bold text-foreground">{burnDownStats.last24h.toLocaleString()}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Avg daily</p>
+                      <p className="text-2xl font-bold text-foreground">{burnDownStats.avgDaily.toLocaleString()}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Trend</p>
+                      <p className="text-2xl font-bold text-foreground">
+                        {burnTrendDelta > 0 ? "+" : ""}
+                        {burnTrendDelta.toLocaleString()}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {burnTrendDelta > 0 ? "Faster than avg" : burnTrendDelta < 0 ? "Below avg" : "On target"}
+                      </p>
+                    </div>
+                  </div>
+                  <ChartContainer config={burnChartConfig} className="mt-4 h-56 w-full">
+                    <AreaChart data={burnDownStats.points} margin={{ left: 8, right: 12, top: 10, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="label" tickLine={false} axisLine={false} />
+                      <YAxis tickLine={false} axisLine={false} width={40} />
+                      <ChartTooltip content={<ChartTooltipContent />} />
+                      <Area
+                        type="monotone"
+                        dataKey="quantity"
+                        stroke="var(--color-quantity)"
+                        fill="var(--color-quantity)"
+                        fillOpacity={0.2}
+                        strokeWidth={2}
+                        name="Dispatches"
+                      />
+                    </AreaChart>
+                  </ChartContainer>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">No dispatches recorded yet.</p>
+              )}
+            </CardContent>
+          </Card>
+        </section>
 
         {highlightedAlert && (
           <CriticalAlertBanner alert={highlightedAlert} isLoading={alerts.isLoading} />
@@ -374,54 +938,88 @@ export default function RescuePortal() {
             </section>
 
             <section className="rounded-xl border bg-card p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold">Requests</h2>
-                <div className="text-sm text-muted-foreground">Open: {filteredRequests.length}</div>
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <div>
+                  <h2 className="text-xl font-bold">Requests</h2>
+                  <p className="text-xs text-muted-foreground">
+                    Showing filtered open cases: {visibleRequests.length}
+                    {requestPagination?.total != null ? ` • Total backlog: ${requestPagination.total}` : ""}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>
+                    Page {currentRequestPage} / {totalRequestPages}
+                  </span>
+                  <div className="flex gap-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!canPrevRequests || rescueRequests.isFetching}
+                      onClick={() => setParams({ page: Math.max(1, currentRequestPage - 1) })}
+                    >
+                      Prev
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!canNextRequests || rescueRequests.isFetching}
+                      onClick={() => setParams({ page: Math.min(totalRequestPages, currentRequestPage + 1) })}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
               </div>
-              <div className="space-y-3">
-                {pendingRequests.map((r) => (
-                  <div key={r.id} className="rounded-lg border p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="font-semibold">#{r.id} • Priority {r.priority}</div>
-                      <div className="text-sm text-muted-foreground flex items-center gap-2">
-                        <span>{r.location}</span>
-                        {r.peopleCount ? <Badge variant="outline">{r.peopleCount} people</Badge> : null}
+              {rescueRequests.isLoading ? (
+                <div className="text-sm text-muted-foreground">Loading requests…</div>
+              ) : rescueRequests.error ? (
+                <div className="text-sm text-red-500">Unable to load requests.</div>
+              ) : (
+                <div className="space-y-3">
+                  {pendingRequests.map((r) => (
+                    <div key={r.id} className="rounded-lg border p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="font-semibold">#{r.id} • Priority {r.priority}</div>
+                        <div className="text-sm text-muted-foreground flex items-center gap-2">
+                          <span>{r.location}</span>
+                          {r.peopleCount ? <Badge variant="outline">{r.peopleCount} people</Badge> : null}
+                        </div>
+                      </div>
+                      <div className="mt-2 text-sm">{r.details}</div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => handleUpdateRequest(r.id, "in_progress")}
+                          disabled={updateRescueRequest.isPending}
+                        >
+                          Mark In-Progress
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => handleUpdateRequest(r.id, "fulfilled")}
+                          disabled={updateRescueRequest.isPending}
+                        >
+                          Fulfill
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleUpdateRequest(r.id, "cancelled")}
+                          disabled={updateRescueRequest.isPending}
+                        >
+                          Cancel
+                        </Button>
                       </div>
                     </div>
-                    <div className="mt-2 text-sm">{r.details}</div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => handleUpdateRequest(r.id, "in_progress")}
-                        disabled={updateRescueRequest.isPending}
-                      >
-                        Mark In-Progress
-                      </Button>
-                      <Button
-                        size="sm"
-                        onClick={() => handleUpdateRequest(r.id, "fulfilled")}
-                        disabled={updateRescueRequest.isPending}
-                      >
-                        Fulfill
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleUpdateRequest(r.id, "cancelled")}
-                        disabled={updateRescueRequest.isPending}
-                      >
-                        Cancel
-                      </Button>
+                  ))}
+                  {pendingRequests.length === 0 && (
+                    <div className="text-sm text-muted-foreground">
+                      No pending requests within {selectedWarehouse?.name ?? "this hub"}'s coverage radius.
                     </div>
-                  </div>
-                ))}
-                {pendingRequests.length === 0 && (
-                  <div className="text-sm text-muted-foreground">
-                    No pending requests within {selectedWarehouse?.name ?? "this hub"}'s coverage radius.
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
+              )}
             </section>
 
             <section className="rounded-xl border bg-card p-6">
@@ -431,9 +1029,9 @@ export default function RescuePortal() {
               </div>
               <div className="space-y-5">
                 {warehouses.map((w) => {
-                  const totalStock = warehouseInventory.get(w.id) ?? 0;
+                  const totalStock = getWarehouseStock(w.id);
                   const capacityPct = w.capacity ? Math.min(100, Math.round((totalStock / w.capacity) * 100)) : 0;
-                  const warehouseResources = resourcesByWarehouse.get(w.id) ?? [];
+                  const warehouseResources = getWarehouseResources(w.id);
                   return (
                     <div key={w.id} className="rounded-lg border p-4 space-y-4">
                       <div className="flex items-center justify-between">
@@ -495,15 +1093,234 @@ export default function RescuePortal() {
               </div>
             </section>
 
+            <section className="grid gap-6 lg:grid-cols-2">
+              <div className="rounded-xl border bg-card p-6">
+                <h2 className="text-xl font-bold">Manual Dispatch</h2>
+                <p className="text-sm text-muted-foreground">
+                  Push supplies to the field with linked requests and provenance notes.
+                </p>
+                <form className="mt-4 space-y-3" onSubmit={submitDispatchLog}>
+                  <div>
+                    <Label>Resource</Label>
+                    <select
+                      className="mt-1 h-10 w-full rounded-md border px-3"
+                      disabled={isDispatching}
+                      {...dispatchForm.register("resourceId")}
+                    >
+                      <option value="">Select resource</option>
+                      {resourceList.map((resource) => (
+                        <option key={resource.id} value={resource.id}>
+                          {resource.type} • WH {resource.warehouseId}
+                        </option>
+                      ))}
+                    </select>
+                    {selectedDispatchResource ? (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {selectedDispatchResource.quantity} {selectedDispatchResource.unit ?? "units"} available at {warehouseNameMap[selectedDispatchResource.warehouseId] ?? `Warehouse ${selectedDispatchResource.warehouseId}`}
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-xs text-muted-foreground">Select a stock item to see availability.</p>
+                    )}
+                    {dispatchForm.formState.errors.resourceId && (
+                      <p className="text-xs text-destructive mt-1">
+                        {dispatchForm.formState.errors.resourceId.message}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <Label>Source warehouse</Label>
+                    <select
+                      className="mt-1 h-10 w-full rounded-md border px-3"
+                      disabled={isDispatching || !warehouses.length}
+                      {...dispatchForm.register("warehouseId")}
+                    >
+                      <option value="">Select warehouse</option>
+                      {warehouses.map((warehouse) => (
+                        <option key={warehouse.id} value={warehouse.id}>
+                          {warehouse.name}
+                        </option>
+                      ))}
+                    </select>
+                    {dispatchForm.formState.errors.warehouseId && (
+                      <p className="text-xs text-destructive mt-1">
+                        {dispatchForm.formState.errors.warehouseId.message}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <Label>Quantity</Label>
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      placeholder="Units to dispatch"
+                      disabled={isDispatching}
+                      {...dispatchForm.register("quantity")}
+                    />
+                    {dispatchForm.formState.errors.quantity && (
+                      <p className="text-xs text-destructive mt-1">
+                        {dispatchForm.formState.errors.quantity.message}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <Label>Destination</Label>
+                    <Input
+                      placeholder="Relief camp, GPS coordinate, etc."
+                      disabled={isDispatching}
+                      {...dispatchForm.register("destination")}
+                    />
+                    {dispatchForm.formState.errors.destination && (
+                      <p className="text-xs text-destructive mt-1">
+                        {dispatchForm.formState.errors.destination.message}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <Label>Link to request (optional)</Label>
+                    <select
+                      className="mt-1 h-10 w-full rounded-md border px-3"
+                      disabled={isDispatching || !dispatchableRequests.length}
+                      {...dispatchForm.register("requestId")}
+                    >
+                      <option value="">No linked request</option>
+                      {dispatchableRequests.map((request) => (
+                        <option key={request.id} value={request.id}>
+                          #{request.id} • {request.location}
+                        </option>
+                      ))}
+                    </select>
+                    {dispatchForm.formState.errors.requestId && (
+                      <p className="text-xs text-destructive mt-1">
+                        {dispatchForm.formState.errors.requestId.message}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <Label>Notes</Label>
+                    <Textarea
+                      placeholder="Convoy, strike team, driver, etc."
+                      disabled={isDispatching}
+                      {...dispatchForm.register("notes")}
+                    />
+                    {dispatchForm.formState.errors.notes && (
+                      <p className="text-xs text-destructive mt-1">
+                        {dispatchForm.formState.errors.notes.message}
+                      </p>
+                    )}
+                  </div>
+                  {dispatchForm.formState.errors.root?.message && (
+                    <p className="text-xs text-destructive">{dispatchForm.formState.errors.root.message}</p>
+                  )}
+                  <Button type="submit" disabled={isDispatching} className="w-full">
+                    {isDispatching ? "Recording…" : "Record dispatch"}
+                  </Button>
+                </form>
+              </div>
+
+              <div className="rounded-xl border bg-card p-6">
+                <h2 className="text-xl font-bold">Inter-hub Transfer</h2>
+                <p className="text-sm text-muted-foreground">
+                  Balance inventory between warehouses with audit-friendly logs.
+                </p>
+                <form className="mt-4 space-y-3" onSubmit={submitTransferLog}>
+                  <div>
+                    <Label>Resource</Label>
+                    <select
+                      className="mt-1 h-10 w-full rounded-md border px-3"
+                      disabled={isTransferring}
+                      {...transferForm.register("resourceId")}
+                    >
+                      <option value="">Select resource</option>
+                      {resourceList.map((resource) => (
+                        <option key={resource.id} value={resource.id}>
+                          {resource.type} • WH {resource.warehouseId}
+                        </option>
+                      ))}
+                    </select>
+                    {selectedTransferResource ? (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Currently {selectedTransferResource.quantity} {selectedTransferResource.unit ?? "units"} at {warehouseNameMap[selectedTransferResource.warehouseId] ?? `Warehouse ${selectedTransferResource.warehouseId}`}
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-xs text-muted-foreground">Choose an item to view source details.</p>
+                    )}
+                    {transferForm.formState.errors.resourceId && (
+                      <p className="text-xs text-destructive mt-1">
+                        {transferForm.formState.errors.resourceId.message}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <Label>Destination warehouse</Label>
+                    <select
+                      className="mt-1 h-10 w-full rounded-md border px-3"
+                      disabled={isTransferring || !warehouses.length}
+                      {...transferForm.register("toWarehouseId")}
+                    >
+                      <option value="">Select destination</option>
+                      {warehouses.map((warehouse) => (
+                        <option
+                          key={warehouse.id}
+                          value={warehouse.id}
+                          disabled={selectedTransferResource?.warehouseId === warehouse.id}
+                        >
+                          {warehouse.name}
+                        </option>
+                      ))}
+                    </select>
+                    {transferForm.formState.errors.toWarehouseId && (
+                      <p className="text-xs text-destructive mt-1">
+                        {transferForm.formState.errors.toWarehouseId.message}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <Label>Quantity</Label>
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      placeholder="Units to move"
+                      disabled={isTransferring}
+                      {...transferForm.register("quantity")}
+                    />
+                    {transferForm.formState.errors.quantity && (
+                      <p className="text-xs text-destructive mt-1">
+                        {transferForm.formState.errors.quantity.message}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <Label>Note</Label>
+                    <Textarea
+                      placeholder="Driver, ETA, route, etc."
+                      disabled={isTransferring}
+                      {...transferForm.register("note")}
+                    />
+                    {transferForm.formState.errors.note && (
+                      <p className="text-xs text-destructive mt-1">
+                        {transferForm.formState.errors.note.message}
+                      </p>
+                    )}
+                  </div>
+                  {transferForm.formState.errors.root?.message && (
+                    <p className="text-xs text-destructive">{transferForm.formState.errors.root.message}</p>
+                  )}
+                  <Button type="submit" disabled={isTransferring} className="w-full">
+                    {isTransferring ? "Recording…" : "Record transfer"}
+                  </Button>
+                </form>
+              </div>
+            </section>
+
             <section className="rounded-xl border bg-card p-6">
               <h2 className="text-xl font-bold mb-4">Real-Time Tracking Panel</h2>
               <ul className="space-y-3 text-sm">
-                {filteredRequests.slice(0, 3).map((req) => (
+                {visibleRequests.slice(0, 3).map((req) => (
                   <li key={req.id}>
                     Request #{req.id} • {req.priority} priority at {req.location} ({req.peopleCount ?? 1} people waiting)
                   </li>
                 ))}
-                {filteredRequests.length === 0 && (
+                {visibleRequests.length === 0 && (
                   <li className="text-muted-foreground">All requests fulfilled and no pending dispatches.</li>
                 )}
               </ul>
@@ -542,17 +1359,85 @@ export default function RescuePortal() {
               <h3 className="text-lg font-bold">Resource Overview</h3>
               <ul className="mt-3 space-y-1 text-sm">
                 <li>Current available resources: <strong>{availableResources}</strong></li>
-                <li>Open rescue cases: <strong>{filteredRequests.length}</strong></li>
+                <li>Open rescue cases: <strong>{backlogSummary?.openRequests ?? 0}</strong></li>
                 <li>People needing help: <strong>{peopleNeedingHelp}</strong></li>
                 <li>Estimated kits required: <strong>{estimatedResourceDemand}</strong></li>
                 <li>Warehouses with stock: <strong>{warehousesWithInventory}</strong> / {warehouses.length}</li>
+                <li>High-priority backlog: <strong>{priorityBreakdown?.high ?? 0}</strong></li>
+                <li>
+                  Low-stock SKUs:
+                  {lowStockQuery.isLoading ? (
+                    <span className="ml-1 text-muted-foreground">Loading...</span>
+                  ) : (
+                    <>
+                      {" "}
+                      <strong>{lowStockTotal}</strong> ({depletedResourceCount} depleted)
+                    </>
+                  )}
+                </li>
               </ul>
+            </section>
+
+            <section className="rounded-xl border bg-card p-6">
+              <h3 className="text-lg font-bold">Priority Focus</h3>
+              {recentCriticalRequests.length ? (
+                <ul className="mt-3 space-y-2 text-sm">
+                  {recentCriticalRequests.slice(0, 5).map((request) => (
+                    <li key={request.id} className="rounded-md border px-3 py-2">
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>#{request.id} • {request.priority}</span>
+                        <span>{request.status.replace("_", " ")}</span>
+                      </div>
+                      <p className="text-sm font-medium">{request.location}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Criticality {request.criticalityScore} • {request.peopleCount ?? 1} people waiting
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-3 text-sm text-muted-foreground">No critical cases flagged.</p>
+              )}
+            </section>
+
+            <section className="rounded-xl border bg-card p-6">
+              <h3 className="text-lg font-bold">Low-Stock Alerts</h3>
+              {lowStockQuery.isLoading ? (
+                <div className="mt-3 space-y-2">
+                  {Array.from({ length: 3 }).map((_, index) => (
+                    <Skeleton key={`low-stock-skeleton-${index}`} className="h-12 w-full" />
+                  ))}
+                </div>
+              ) : lowStockQuery.error ? (
+                <p className="mt-3 text-sm text-destructive">Unable to load low-stock resources.</p>
+              ) : topLowStockAlerts.length ? (
+                <ul className="mt-3 space-y-2 text-sm">
+                  {topLowStockAlerts.map((resource) => (
+                    <li key={resource.id} className="flex items-center justify-between">
+                      <div>
+                        <p className="font-semibold">{resource.type}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {resource.quantity} / {resource.reorderLevel} {resource.unit} • WH {resource.warehouseId}
+                        </p>
+                      </div>
+                      <Badge variant="destructive">Low</Badge>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-3 text-sm text-muted-foreground">No low-stock resources right now.</p>
+              )}
+              {lowStockTotal > topLowStockAlerts.length && !lowStockQuery.isLoading && !lowStockQuery.error ? (
+                <p className="mt-4 text-xs text-muted-foreground">
+                  Showing {topLowStockAlerts.length} of {lowStockTotal} low-stock alerts.
+                </p>
+              ) : null}
             </section>
 
             <section className="rounded-xl border bg-card p-6">
               <h3 className="text-lg font-bold">Requests Sidebar</h3>
               <ul className="mt-3 space-y-2 text-sm max-h-72 overflow-auto">
-                {filteredRequests.map((r) => (
+                {visibleRequests.map((r) => (
                   <li key={r.id} className="flex items-center justify-between">
                     <span>#{r.id}</span>
                     <span className="text-muted-foreground">{r.status}</span>
@@ -699,15 +1584,91 @@ export function getSeverityRank(severity?: string | null) {
   return severityOrder[severity.toLowerCase()] ?? 0;
 }
 
-function filterRequestsByHub(requests: RescueRequest[], warehouse: Warehouse | null) {
-  if (!warehouse) return requests;
+function matchesRescueSearch(request: RescueRequest, searchTerm: string) {
+  const haystack = [
+    `#${request.id}`,
+    request.location,
+    request.details,
+    request.priority,
+    request.status,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(searchTerm);
+}
+
+function compareRescueRequests(
+  a: RescueRequest,
+  b: RescueRequest,
+  sortBy: "createdAt" | "criticalityScore" | "priority",
+  direction: "asc" | "desc",
+) {
+  let delta = 0;
+  if (sortBy === "createdAt") {
+    delta = (a.createdAt ?? 0) - (b.createdAt ?? 0);
+  } else if (sortBy === "criticalityScore") {
+    delta = (a.criticalityScore ?? 0) - (b.criticalityScore ?? 0);
+  } else if (sortBy === "priority") {
+    delta = getPriorityRankValue(a.priority) - getPriorityRankValue(b.priority);
+  }
+  return direction === "asc" ? delta : -delta;
+}
+
+function getPriorityRankValue(priority: RescueRequest["priority"]) {
+  switch (priority) {
+    case "high":
+      return 3;
+    case "medium":
+      return 2;
+    default:
+      return 1;
+  }
+}
+
+function formatMinutesLabel(minutes?: number | null) {
+  if (!minutes || minutes <= 0) return "<1 min";
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const mins = Math.round(minutes % 60);
+  if (mins === 0) return `${hours}h`;
+  return `${hours}h ${mins}m`;
+}
+
+function calculateMedian(values: number[]) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) {
+    return (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+  return sorted[mid];
+}
+
+function startOfDayMs(timestamp: number) {
+  const date = new Date(timestamp);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+function filterRequestsByHub(requests: RescueRequest[], warehouse: Warehouse) {
   return requests.filter((request) => isRequestWithinHub(request, warehouse));
 }
 
 function isRequestWithinHub(request: RescueRequest, warehouse: Warehouse) {
-  if (warehouse.latitude != null && warehouse.longitude != null && request.latitude != null && request.longitude != null) {
-    const distanceKm = calculateDistanceKm(request.latitude, request.longitude, warehouse.latitude, warehouse.longitude);
-    return distanceKm <= NEIGHBOR_RADIUS_KM;
+  if (
+    warehouse.latitude != null &&
+    warehouse.longitude != null &&
+    request.latitude != null &&
+    request.longitude != null
+  ) {
+    const distanceKm = calculateDistanceKm(
+      request.latitude,
+      request.longitude,
+      warehouse.latitude,
+      warehouse.longitude,
+    );
+    return distanceKm <= 120;
   }
   const hubCity = extractCityKeyword(warehouse.location ?? "");
   const requestCity = extractCityKeyword(request.location ?? "");
@@ -719,7 +1680,7 @@ function isRequestWithinHub(request: RescueRequest, warehouse: Warehouse) {
 }
 
 function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const R = 6371; // km
+  const R = 6371;
   const dLat = toRadians(lat2 - lat1);
   const dLon = toRadians(lon2 - lon1);
   const a =
@@ -736,6 +1697,12 @@ function toRadians(value: number) {
 function extractCityKeyword(location: string) {
   const primary = location.split(",")[0] ?? "";
   return primary.trim().toLowerCase();
+}
+
+function getStockRatio(resource: Resource) {
+  const reorderLevel = resource.reorderLevel ?? 0;
+  const divisor = reorderLevel > 0 ? reorderLevel : Math.max(1, resource.quantity);
+  return resource.quantity / divisor;
 }
 
 export function isHighSeverity(severity?: string | null) {

@@ -18,10 +18,12 @@ import predictiveRoutes from "./routes/predictive";
 import healthRoutes from "./routes/health";
 import transparencyRoutes from "./routes/transparency";
 import userRoutes from "./routes/users";
+import providerHealthRoutes from "./routes/providerHealth";
 import { startLiveFeedScheduler } from "./services/live-feed-scheduler";
 import { startPredictiveAllocationScheduler } from "./services/predictive-allocation";
 import { startDemandSnapshotScheduler } from "./services/demand-snapshot-scheduler";
 import { startTransparencyReportScheduler } from "./services/transparency-report-scheduler";
+import { startProviderHealthScheduler } from "./services/provider-health";
 
 export function createServer() {
   const app = express();
@@ -67,11 +69,13 @@ export function createServer() {
   app.use("/api/health", healthRoutes);
   app.use("/api/transparency", transparencyRoutes);
   app.use("/api/users", userRoutes);
+  app.use("/api/providers/health", providerHealthRoutes);
 
   startLiveFeedScheduler();
   startPredictiveAllocationScheduler();
   startDemandSnapshotScheduler();
   startTransparencyReportScheduler();
+  startProviderHealthScheduler();
 
   // Example API routes
   app.get("/api/ping", (_req, res) => {

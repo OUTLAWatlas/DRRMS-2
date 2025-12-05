@@ -1,5 +1,15 @@
 import { sql } from "drizzle-orm";
-import { bigint, boolean, doublePrecision, index, integer, pgTable, serial, text, uniqueIndex } from "drizzle-orm/pg-core";
+import {
+  bigint,
+  boolean,
+  doublePrecision,
+  index,
+  integer,
+  pgTable,
+  serial,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 
 const nowMs = sql`(EXTRACT(EPOCH FROM NOW()) * 1000)::bigint`;
 
@@ -69,6 +79,7 @@ export const rescueRequests = pgTable("rescue_requests", {
   lastScoredAt: bigint("last_scored_at", { mode: "number" }),
   createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
+  version: integer("version").notNull().default(1),
 });
 
 export const warehouses = pgTable("warehouses", {
@@ -94,6 +105,7 @@ export const resources = pgTable("resources", {
     .references(() => warehouses.id, { onDelete: "cascade" }),
   createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
+  version: integer("version").notNull().default(1),
 });
 
 export const resourceTransfers = pgTable("resource_transfers", {
@@ -147,6 +159,8 @@ export const resourceAllocations = pgTable("resource_allocations", {
   latitude: doublePrecision("latitude"),
   longitude: doublePrecision("longitude"),
   allocatedAt: bigint("allocated_at", { mode: "number" }).notNull().default(nowMs),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
+  version: integer("version").notNull().default(1),
 });
 
 export const requestPrioritySnapshots = pgTable("request_priority_snapshots", {
@@ -331,6 +345,25 @@ export const transparencyReports = pgTable(
   }),
 );
 
+export const transparencyLedger = pgTable(
+  "transparency_ledger",
+  {
+    id: serial("id").primaryKey(),
+    entryType: text("entry_type").notNull(),
+    payload: text("payload").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    previousHash: text("previous_hash"),
+    entryHash: text("entry_hash").notNull(),
+    signature: text("signature"),
+    actorId: integer("actor_id").references(() => users.id, { onDelete: "set null" }),
+    metadata: text("metadata"),
+    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
+  },
+  (table) => ({
+    hashIdx: uniqueIndex("transparency_ledger_entry_hash_idx").on(table.entryHash),
+  }),
+);
+
 export const requestFeatureSnapshots = pgTable("request_feature_snapshots", {
   id: serial("id").primaryKey(),
   requestId: integer("request_id")
@@ -415,3 +448,92 @@ export const schedulerMetrics = pgTable("scheduler_metrics", {
   lastErrorMessage: text("last_error_message"),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
 });
+
+export type ProviderHealthStatus = "healthy" | "elevated" | "degraded" | "critical" | "offline";
+
+export type ProviderFreshnessState = "fresh" | "stale" | "unknown";
+
+export type ProviderHealthEventType = "status_change" | "sla_breach" | "roster_update" | "ping_timeout";
+
+export const providerHealthSnapshots = pgTable(
+  "provider_health_snapshots",
+  {
+    id: serial("id").primaryKey(),
+    providerId: text("provider_id").notNull(),
+    providerName: text("provider_name").notNull(),
+    status: text("status")
+      .$type<ProviderHealthStatus>()
+      .notNull()
+      .default("healthy"),
+    uptimePercent: doublePrecision("uptime_percent"),
+    latencyMs: integer("latency_ms"),
+    activeIncidents: integer("active_incidents").notNull().default(0),
+    slaTier: text("sla_tier"),
+    coverageRegion: text("coverage_region"),
+    coverageRadiusKm: doublePrecision("coverage_radius_km"),
+    latitude: doublePrecision("latitude"),
+    longitude: doublePrecision("longitude"),
+    lastPingAt: bigint("last_ping_at", { mode: "number" }),
+    freshnessState: text("freshness_state")
+      .$type<ProviderFreshnessState>()
+      .notNull()
+      .default("fresh"),
+    dataSources: text("data_sources"),
+    metadata: text("metadata"),
+    observedAt: bigint("observed_at", { mode: "number" }).notNull(),
+    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
+    rosterLead: text("roster_lead"),
+    rosterContact: text("roster_contact"),
+    rosterShiftStartsAt: bigint("roster_shift_starts_at", { mode: "number" }),
+    rosterShiftEndsAt: bigint("roster_shift_ends_at", { mode: "number" }),
+  },
+  (table) => ({
+    providerIdx: uniqueIndex("provider_health_snapshots_provider_idx").on(table.providerId),
+    observedIdx: index("provider_health_snapshots_observed_idx").on(table.observedAt),
+  }),
+);
+
+export const providerHealthEvents = pgTable(
+  "provider_health_events",
+  {
+    id: serial("id").primaryKey(),
+    providerId: text("provider_id").notNull(),
+    providerName: text("provider_name").notNull(),
+    eventType: text("event_type")
+      .$type<ProviderHealthEventType>()
+      .notNull()
+      .default("status_change"),
+    previousStatus: text("previous_status").$type<ProviderHealthStatus | null>().default(null),
+    nextStatus: text("next_status").$type<ProviderHealthStatus | null>().default(null),
+    severity: text("severity"),
+    message: text("message").notNull(),
+    metadata: text("metadata"),
+    observedAt: bigint("observed_at", { mode: "number" }).notNull(),
+    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
+  },
+  (table) => ({
+    providerIdx: index("provider_health_events_provider_idx").on(table.providerId),
+    observedIdx: index("provider_health_events_observed_idx").on(table.observedAt),
+  }),
+);
+
+export const providerOncallRosters = pgTable(
+  "provider_oncall_rosters",
+  {
+    id: serial("id").primaryKey(),
+    providerId: text("provider_id").notNull(),
+    providerName: text("provider_name").notNull(),
+    shiftOwner: text("shift_owner").notNull(),
+    role: text("role"),
+    contactChannel: text("contact_channel"),
+    escalationPolicy: text("escalation_policy"),
+    shiftStartsAt: bigint("shift_starts_at", { mode: "number" }),
+    shiftEndsAt: bigint("shift_ends_at", { mode: "number" }),
+    coverageNotes: text("coverage_notes"),
+    metadata: text("metadata"),
+    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
+  },
+  (table) => ({
+    providerIdx: index("provider_oncall_rosters_provider_idx").on(table.providerId),
+  }),
+);

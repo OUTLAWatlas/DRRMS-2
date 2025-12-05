@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../db";
 import { distributionLogs, resources } from "../db/schema";
@@ -32,9 +32,14 @@ router.post("/", authMiddleware, rescuerOnly, async (req: AuthRequest, res) => {
         throw badRequest("Resource does not belong to the provided warehouse");
       if (resource.quantity < payload.quantity) throw badRequest("Insufficient stock to dispatch");
 
+      const timestamp = Date.now();
       await tx
         .update(resources)
-        .set({ quantity: resource.quantity - payload.quantity, updatedAt: Date.now() })
+        .set({
+          quantity: sql`${resources.quantity} - ${payload.quantity}`,
+          updatedAt: timestamp,
+          version: sql`${resources.version} + 1`,
+        })
         .where(eq(resources.id, resource.id));
 
       const [log] = await tx

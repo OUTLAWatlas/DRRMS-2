@@ -10,6 +10,7 @@ import {
   users,
   warehouses,
 } from "../db/schema";
+import { appendLedgerEntry } from "./transparency-ledger";
 
 const BUCKET_MINUTES = Number(process.env.TRANSPARENCY_BUCKET_MINUTES ?? 60);
 const SIGNING_SECRET = process.env.TRANSPARENCY_SIGNING_SECRET || process.env.JWT_SECRET || "drrms-sign";
@@ -96,7 +97,7 @@ export async function generateTransparencyReport(now = Date.now()) {
   const hash = createHash("sha256").update(payloadString).digest("hex");
   const signature = createHmac("sha256", SIGNING_SECRET).update(hash).digest("hex");
 
-  await db
+  const [record] = await db
     .insert(transparencyReports)
     .values({
       bucketStart,
@@ -115,7 +116,23 @@ export async function generateTransparencyReport(now = Date.now()) {
         signature,
         metadata: JSON.stringify({ version: 1 }),
       },
-    });
+    })
+    .returning({ id: transparencyReports.id });
+
+  await appendLedgerEntry({
+    entryType: "transparency_report",
+    payload: {
+      reportId: record?.id ?? null,
+      bucketStart,
+      bucketEnd,
+      payloadHash: hash,
+    },
+    metadata: {
+      reportId: record?.id ?? null,
+      bucketStart,
+      bucketEnd,
+    },
+  });
 
   return { bucketStart, bucketEnd, hash };
 }

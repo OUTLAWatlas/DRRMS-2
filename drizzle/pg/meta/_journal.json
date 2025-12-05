@@ -15,6 +15,27 @@
       "when": 1764876000000,
       "tag": "0001_transparency_reports",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1764967264551,
+      "tag": "0002_solid_charles_xavier",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1764968367380,
+      "tag": "0003_worthless_grim_reaper",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1765022400000,
+      "tag": "0004_offline_sync_prep",
+      "breakpoints": true
     }
   ]
 }

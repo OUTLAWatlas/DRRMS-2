@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { desc, eq, and } from "drizzle-orm";
+import { desc, eq, and, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import { resources, resourceTransfers } from "../db/schema";
 import { authMiddleware, rescuerOnly, type AuthRequest } from "../middleware/auth";
@@ -31,9 +31,14 @@ router.post("/", authMiddleware, rescuerOnly, async (req: AuthRequest, res) => {
       if (source.quantity < payload.quantity) throw badRequest("Insufficient stock to transfer");
       if (source.warehouseId === payload.toWarehouseId) throw badRequest("Select a different destination warehouse");
 
+      const timestamp = Date.now();
       await tx
         .update(resources)
-        .set({ quantity: source.quantity - payload.quantity, updatedAt: Date.now() })
+        .set({
+          quantity: sql`${resources.quantity} - ${payload.quantity}`,
+          updatedAt: timestamp,
+          version: sql`${resources.version} + 1`,
+        })
         .where(eq(resources.id, source.id));
 
       const existingTarget = await tx
@@ -46,7 +51,11 @@ router.post("/", authMiddleware, rescuerOnly, async (req: AuthRequest, res) => {
         const target = existingTarget[0];
         await tx
           .update(resources)
-          .set({ quantity: target.quantity + payload.quantity, updatedAt: Date.now() })
+          .set({
+            quantity: sql`${resources.quantity} + ${payload.quantity}`,
+            updatedAt: timestamp,
+            version: sql`${resources.version} + 1`,
+          })
           .where(eq(resources.id, target.id));
       } else {
         await tx.insert(resources).values({

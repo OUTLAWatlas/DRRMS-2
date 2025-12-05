@@ -690,6 +690,77 @@ Monolith → Microservices Migration
 
 ---
 
+## 15. Provider Health Live Feed Architecture (Planned)
+
+### Objectives
+
+- Surface live status for logistics providers, NGOs, and third-party responders so dispatchers can trustfuly route work.
+- Fuse multiple upstream feeds (synthetic pings, contractual SLAs, and staffing rosters) into a single, queryable signal.
+- Stream the fused signal into the UI within <10s of change while storing an auditable history for transparency/analytics.
+
+### Upstream Data Sources
+
+| Source | Transport | Payload Highlights | Poll/Stream Cadence |
+|--------|-----------|--------------------|---------------------|
+| Status Pings | HTTPS/WebSocket probes managed by `provider-health-agent` | endpoint URL, response latency, HTTP status, optional synthetic transaction metrics | Every 30s (critical) / 2m (standard) with jitter |
+| SLA Contracts | REST pull from vendor portals or S3 dropbox | target uptime, maintenance windows, degradation notices w/ timestamps | Refresh every 15m + webhook triggers |
+| On-Call Rosters | PagerDuty/OpsGenie REST + webhook fan-in | shift owner, escalation chain, contact channels, shift start/end | Fetch hourly + instant webhook sync |
+
+Each feed lands in an ingestion topic (Redis stream/Kafka partition) with a normalized envelope: `{ providerId, source, observedAt, payload }` to simplify downstream processing.
+
+### Health Telemetry Service
+
+```
+Scheduler (BullMQ)
+    ↓ (triggers)
+collectStatusPings()  collectSLAWindows()  collectRosters()
+    ↓                        ↓                   ↓
+Normalization Layer (Zod schemas + hash-based idempotency)
+    ↓
+Provider Health Aggregator
+    ├─ Computes rolling uptime %, SLA breaches, staffing coverage
+    ├─ Persists snapshot + diff
+    └─ Publishes real-time event → `provider-health:live` channel (SSE/WebSocket)
+```
+
+- **Storage**: new tables `provider_health_snapshots`, `provider_health_events`, and `provider_oncall_rosters` in Postgres (future PostGIS geometry column for coverage regions).
+- **API Layer**: `/api/providers/health` (latest view, filterable) and `/api/providers/health/stream` (SSE) expose the data; both enforce rescuer/admin auth scopes.
+- **Backfill**: hourly job compacts historical events into day-level aggregates for analytics dashboards.
+
+### Frontend Surfaces
+
+- **Health Cards Grid** (Rescue Portal sidebar): one card per provider showing signal lights (green/amber/red), uptime %, current SLA tier, roster contact (tap-to-call). Cards subscribe to the SSE channel and optimistically update TanStack Query cache.
+- **Map Overlay** (ResourcesPage + RescuePortal map mode): providers with geographic coverage render as polygons colored by health state; degradations pulse with a subtle animation and tooltips include latest SLA notice + on-call owner.
+- **Alert Banner + Activity Feed**: when a provider enters `degraded` or `critical`, a Sonner toast and timeline entry appear referencing the transparency ledger hash for the event (keeps auditability aligned with blockchain-backed transparency goals).
+
+### Operational Considerations
+
+- **Graceful Degradation**: if streaming drops, UI falls back to 30s HTTP poll; backend marks each snapshot with `freshness_state` so stale data is obvious.
+- **Testing Hooks**: local dev can stub feeds via `pnpm dev --provider-stubs` which replays canned payloads into the aggregator for UI work without real vendors.
+- **Observability**: metrics exported (`provider_health_ingest_latency_ms`, `provider_health_stream_clients`) feed into Prometheus/Grafana for NOC visibility.
+
+### Local Smoke Test
+
+1. `pnpm db:migrate && pnpm db:seed` – migrations plus seeding now call the provider health ingestor so Postgres already has fresh snapshots/events when the app boots.
+2. `pnpm dev` – start the combined Vite + Express stack on `http://localhost:8080`.
+3. In a new terminal, log in as the seeded rescuer (`rescuer@drrms.org` / `password123`) or admin (`admin@drrms.org` / `adminSecure123`) to grab a JWT:
+     ```bash
+     curl -s -X POST http://localhost:8080/api/auth/login \
+         -H "Content-Type: application/json" \
+         -d '{"email":"rescuer@drrms.org","password":"password123"}'
+     ```
+     Copy the `token` field from the response.
+4. Stream the SSE feed with that token (Authorization header or `?token=` query both work):
+     ```bash
+     curl -N -H "Authorization: Bearer YOUR_TOKEN" \
+         http://localhost:8080/api/providers/health/stream
+     ```
+     You should immediately see a bootstrap payload (thanks to seeding) followed by periodic `provider-health` events and 25s heartbeats.
+
+This architecture keeps the provider health feature isolated yet composable with the rest of DRRMS: ingestion jobs live alongside other schedulers, data persists in Postgres (extendable to PostGIS), and the UI consumes the same typed contracts shared in `@shared/api`.
+
+---
+
 ## Architecture Principles
 
 ### Current Principles

@@ -2,6 +2,7 @@ import "dotenv/config";
 import bcrypt from "bcryptjs";
 import { and, eq, sql } from "drizzle-orm";
 import { generateDemandFeatureSnapshot } from "../services/demand-snapshot";
+import { ingestProviderHealthTelemetry, isProviderHealthEnabled } from "../services/provider-health";
 import { getDbAsync } from "./index";
 import {
   demandFeatureSnapshots,
@@ -575,6 +576,7 @@ async function seedDatabase() {
     await seedTransactions(db, adminId ?? rescuerId, TRANSACTION_SEED);
     await seedLiveFeeds(db);
     await seedDemandSnapshots(db, DEMAND_SEED_PRESETS[profile]);
+    await seedProviderHealthTelemetry();
     console.log("Generating latest demand snapshot from live data...");
     await generateDemandFeatureSnapshot(new Date());
     console.log("Seeding completed.");
@@ -875,6 +877,29 @@ async function seedDemandSnapshots(
   console.log(
     `Inserted ${rows.length} demand snapshot rows across ${config.bucketCount} buckets (width=${config.bucketMinutes}m)`,
   );
+}
+
+async function seedProviderHealthTelemetry() {
+  console.log("Triggering provider health ingestion seed...");
+  if (!isProviderHealthEnabled()) {
+    console.log("Provider health feature disabled; skipping telemetry seed");
+    return;
+  }
+
+  try {
+    const summary = await ingestProviderHealthTelemetry();
+    if (summary.skipped) {
+      console.log("Provider health ingestion skipped (ingestor already running)");
+      return;
+    }
+    console.log(
+      `Seeded provider telemetry for ${summary.updatedProviders.length} providers ` +
+        `(snapshots=${summary.ingested}, events=${summary.events}, rosters=${summary.rosters})`,
+    );
+  } catch (error) {
+    console.error("Provider health ingestion seed failed", error);
+    throw error;
+  }
 }
 
 function buildDemandSnapshotRows(bucketCount: number, bucketMinutes: number) {

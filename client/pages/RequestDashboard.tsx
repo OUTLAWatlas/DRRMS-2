@@ -3,7 +3,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
+import type { FieldErrors } from "react-hook-form";
 import { useAppStore } from "@/state/app-store";
 import { toast } from "sonner";
 import {
@@ -11,35 +12,15 @@ import {
   useSubmitReportMutation,
   useSubmitRescueRequestMutation,
 } from "@/hooks/api-hooks";
-import type { RescueRequest } from "@shared/api";
+import { createReportSchema, createRescueRequestSchema, survivorSubmissionSchema } from "@shared/api";
+import type { RescueRequest, SurvivorSubmissionInput } from "@shared/api";
+import { useZodForm } from "@/hooks/use-zod-form";
 
-type RequestFormState = {
-  kind: "request" | "report";
-  what: string;
-  where: string;
-  severity: "Low" | "Moderate" | "High" | "Critical";
-  when: string;
-  people: number;
-  resourcesRequired: number;
-  contact: string;
-  notes: string;
-};
-
-const BASE_FORM: RequestFormState = {
-  kind: "request",
-  what: "",
-  where: "",
-  severity: "Moderate",
-  when: "",
-  people: 1,
-  resourcesRequired: 1,
-  contact: "",
-  notes: "",
-};
+const severityOptions = ["Low", "Moderate", "High", "Critical"] as const;
 
 export default function RequestDashboard() {
   const { user, hydrated } = useAppStore();
-  const rescueRequestsQuery = useGetUserRescueRequestsQuery();
+  const rescueRequestsQuery = useGetUserRescueRequestsQuery({ limit: 10 });
   const submitRescueRequest = useSubmitRescueRequestMutation();
   const submitReport = useSubmitReportMutation();
   const loc = useLocation() as any;
@@ -49,59 +30,99 @@ export default function RequestDashboard() {
     | { what?: string; where?: string; severity?: string; when?: string }
     | undefined;
 
-  const [form, setForm] = useState<RequestFormState>({
-    ...BASE_FORM,
-    kind: isReportMode ? "report" : "request",
-    what: prefill?.what ?? "",
-    where: prefill?.where ?? "",
-    severity: (prefill?.severity as any) ?? "Moderate",
-    when: prefill?.when ?? "",
+  const survivorFormDefaults = useMemo<SurvivorSubmissionInput>(() => {
+    const base = {
+      what: prefill?.what ?? "",
+      where: prefill?.where ?? "",
+      severity: (prefill?.severity as SurvivorSubmissionInput["severity"]) ?? "Moderate",
+      when: prefill?.when ?? "",
+      people: 1,
+      contact: "",
+      notes: "",
+    } satisfies Omit<SurvivorSubmissionInput, "kind" | "resourcesRequired">;
+
+    if (isReportMode) {
+      return {
+        kind: "report",
+        ...base,
+      } satisfies SurvivorSubmissionInput;
+    }
+
+    return {
+      kind: "request",
+      ...base,
+      resourcesRequired: 1,
+    } satisfies SurvivorSubmissionInput;
+  }, [isReportMode, prefill?.what, prefill?.where, prefill?.severity, prefill?.when]);
+
+  const survivorForm = useZodForm({
+    schema: survivorSubmissionSchema,
+    defaultValues: survivorFormDefaults,
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const { register, handleSubmit: handleSurvivorSubmit, formState } = survivorForm;
+  const requestErrors = formState.errors as FieldErrors<SurvivorRequestForm>;
+
+  useEffect(() => {
+    survivorForm.reset(survivorFormDefaults);
+  }, [survivorFormDefaults, survivorForm]);
+
+  useEffect(() => {
+    survivorForm.setValue("kind", isReportMode ? "report" : "request");
+  }, [isReportMode, survivorForm]);
+
+  const onSubmit = handleSurvivorSubmit((values) => {
     if (!hydrated) return;
     if (!user) {
       toast.error("Please sign in before submitting a request.");
       return;
     }
 
-    if (isReportMode) {
-      submitReport.mutate(
-        {
-          whatHappened: form.what,
-          location: form.where,
-          severity: form.severity as any,
-          occurredAt: form.when ? new Date(form.when).toISOString() : undefined,
+    survivorForm.clearErrors("root");
+
+    if (values.kind === "report") {
+      const payload = createReportSchema.parse({
+        whatHappened: values.what,
+        location: values.where,
+        severity: values.severity,
+        occurredAt: values.when ? new Date(values.when).toISOString() : undefined,
+      });
+      submitReport.mutate(payload, {
+        onSuccess: () => {
+          toast.success("Disaster report submitted. Help is on the way.");
+          survivorForm.reset({ ...survivorFormDefaults, contact: "", notes: "" });
         },
-        {
-          onSuccess: () => {
-            toast.success("Disaster report submitted. Help is on the way.");
-            setForm((prev) => ({ ...prev, notes: "", contact: "" }));
-          },
-          onError: (error) => {
-            toast.error(error.message || "Failed to submit report");
-          },
+        onError: (error) => {
+          const message = error?.message || "Failed to submit report";
+          toast.error(message);
+          survivorForm.setError("root", { type: "server", message });
         },
-      );
+      });
       return;
     }
 
-    const payload = buildRescuePayload(form);
+    const requestValues = values as SurvivorRequestForm;
+    const payload = createRescueRequestSchema.parse(buildRescuePayload(requestValues));
     submitRescueRequest.mutate(payload, {
       onSuccess: () => {
-        setForm((prev) => ({ ...prev, notes: "", contact: "" }));
+        toast.success("Help request submitted. Stay alert for updates.");
+        survivorForm.reset({ ...survivorFormDefaults, contact: "", notes: "" });
       },
       onError: (error) => {
-        toast.error(error.message || "Failed to submit help request");
+        const message = error?.message || "Failed to submit help request";
+        toast.error(message);
+        survivorForm.setError("root", { type: "server", message });
       },
     });
-  };
+  });
+
+  const isMutating = submitRescueRequest.isPending || submitReport.isPending;
+  const isBusy = isMutating || formState.isSubmitting;
 
   const recentRequests = useMemo(() => {
-    if (!rescueRequestsQuery.data) return [] as RescueRequest[];
-    return rescueRequestsQuery.data.slice(0, 5);
-  }, [rescueRequestsQuery.data]);
+    if (!rescueRequestsQuery.data?.requests) return [] as RescueRequest[];
+    return rescueRequestsQuery.data.requests.slice(0, 5);
+  }, [rescueRequestsQuery.data?.requests]);
 
   if (!hydrated) {
     return (
@@ -141,51 +162,66 @@ export default function RequestDashboard() {
       <p className="text-center text-muted-foreground mb-8">Provide details below so responders can assist quickly.</p>
       <div className="container mx-auto max-w-3xl">
         <div className="rounded-xl bg-white text-black p-6 sm:p-8 shadow-xl">
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={onSubmit} className="space-y-5">
+            <input type="hidden" value={isReportMode ? "report" : "request"} {...register("kind")} />
             {isReportMode ? (
               <>
                 <div>
                   <Label>People needing help</Label>
                   <Input
                     type="number"
+                    inputMode="numeric"
                     min={1}
-                    value={form.people}
-                    onChange={(e) => setForm((f) => ({ ...f, people: Number(e.target.value) }))}
                     className="mt-2"
+                    disabled={isBusy}
+                    {...register("people")}
                   />
+                  {formState.errors.people && (
+                    <p className="mt-1 text-xs text-destructive">
+                      {formState.errors.people.message}
+                    </p>
+                  )}
                 </div>
 
                 <div>
                   <Label>Location</Label>
                   <Input
                     placeholder="Area / address"
-                    value={form.where}
-                    onChange={(e) => setForm((f) => ({ ...f, where: e.target.value }))}
                     className="mt-2"
+                    disabled={isBusy}
+                    {...register("where")}
                   />
+                  {formState.errors.where && (
+                    <p className="mt-1 text-xs text-destructive">
+                      {formState.errors.where.message}
+                    </p>
+                  )}
                 </div>
 
                 <div>
                   <Label>What happened?</Label>
                   <Textarea
                     placeholder="Brief description of the disaster"
-                    value={form.what}
-                    onChange={(e) => setForm((f) => ({ ...f, what: e.target.value }))}
                     className="mt-2"
+                    disabled={isBusy}
+                    {...register("what")}
                   />
+                  {formState.errors.what && (
+                    <p className="mt-1 text-xs text-destructive">
+                      {formState.errors.what.message}
+                    </p>
+                  )}
                 </div>
 
                 <div className="grid sm:grid-cols-2 gap-4">
                   <div>
                     <Label>Severity</Label>
                     <select
-                      value={form.severity}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, severity: e.target.value as RequestFormState["severity"] }))
-                      }
                       className="mt-2 h-10 w-full rounded-md border px-3"
+                      disabled={isBusy}
+                      {...register("severity")}
                     >
-                      {(["Low", "Moderate", "High", "Critical"] as const).map((s) => (
+                      {severityOptions.map((s) => (
                         <option key={s} value={s}>
                           {s}
                         </option>
@@ -196,10 +232,15 @@ export default function RequestDashboard() {
                     <Label>Contact</Label>
                     <Input
                       placeholder="Phone or email"
-                      value={form.contact}
-                      onChange={(e) => setForm((f) => ({ ...f, contact: e.target.value }))}
                       className="mt-2"
+                      disabled={isBusy}
+                      {...register("contact")}
                     />
+                    {formState.errors.contact && (
+                      <p className="mt-1 text-xs text-destructive">
+                        {formState.errors.contact.message}
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -207,10 +248,15 @@ export default function RequestDashboard() {
                   <Label>Additional notes</Label>
                   <Textarea
                     placeholder="Any extra information"
-                    value={form.notes}
-                    onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
                     className="mt-2"
+                    disabled={isBusy}
+                    {...register("notes")}
                   />
+                  {formState.errors.notes && (
+                    <p className="mt-1 text-xs text-destructive">
+                      {formState.errors.notes.message}
+                    </p>
+                  )}
                 </div>
               </>
             ) : (
@@ -220,23 +266,33 @@ export default function RequestDashboard() {
                     <Label>People needing help</Label>
                     <Input
                       type="number"
+                      inputMode="numeric"
                       min={1}
-                      value={form.people}
-                      onChange={(e) => setForm((f) => ({ ...f, people: Number(e.target.value) }))}
                       className="mt-2"
+                      disabled={isBusy}
+                      {...register("people")}
                     />
+                    {formState.errors.people && (
+                      <p className="mt-1 text-xs text-destructive">
+                        {formState.errors.people.message}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <Label>Resources required</Label>
                     <Input
                       type="number"
+                      inputMode="numeric"
                       min={1}
-                      value={form.resourcesRequired}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, resourcesRequired: Number(e.target.value) }))
-                      }
                       className="mt-2"
+                      disabled={isBusy}
+                      {...register("resourcesRequired")}
                     />
+                    {requestErrors.resourcesRequired && (
+                      <p className="mt-1 text-xs text-destructive">
+                        {requestErrors.resourcesRequired.message}
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -245,18 +301,23 @@ export default function RequestDashboard() {
                     <Label>Contact</Label>
                     <Input
                       placeholder="Phone or email"
-                      value={form.contact}
-                      onChange={(e) => setForm((f) => ({ ...f, contact: e.target.value }))}
                       className="mt-2"
+                      disabled={isBusy}
+                      {...register("contact")}
                     />
+                    {formState.errors.contact && (
+                      <p className="mt-1 text-xs text-destructive">
+                        {formState.errors.contact.message}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <Label>When did it occur?</Label>
                     <Input
                       type="datetime-local"
-                      value={form.when}
-                      onChange={(e) => setForm((f) => ({ ...f, when: e.target.value }))}
                       className="mt-2"
+                      disabled={isBusy}
+                      {...register("when")}
                     />
                   </div>
                 </div>
@@ -265,32 +326,40 @@ export default function RequestDashboard() {
                   <Label>Where</Label>
                   <Input
                     placeholder="Area / address"
-                    value={form.where}
-                    onChange={(e) => setForm((f) => ({ ...f, where: e.target.value }))}
                     className="mt-2"
+                    disabled={isBusy}
+                    {...register("where")}
                   />
+                  {formState.errors.where && (
+                    <p className="mt-1 text-xs text-destructive">
+                      {formState.errors.where.message}
+                    </p>
+                  )}
                 </div>
 
                 <div>
                   <Label>What is needed?</Label>
                   <Textarea
                     placeholder="Describe what help you need"
-                    value={form.what}
-                    onChange={(e) => setForm((f) => ({ ...f, what: e.target.value }))}
                     className="mt-2"
+                    disabled={isBusy}
+                    {...register("what")}
                   />
+                  {formState.errors.what && (
+                    <p className="mt-1 text-xs text-destructive">
+                      {formState.errors.what.message}
+                    </p>
+                  )}
                 </div>
 
                 <div>
                   <Label>Severity</Label>
                   <select
-                    value={form.severity}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, severity: e.target.value as RequestFormState["severity"] }))
-                    }
                     className="mt-2 h-10 w-full rounded-md border px-3"
+                    disabled={isBusy}
+                    {...register("severity")}
                   >
-                    {(["Low", "Moderate", "High", "Critical"] as const).map((s) => (
+                    {severityOptions.map((s) => (
                       <option key={s} value={s}>
                         {s}
                       </option>
@@ -302,24 +371,25 @@ export default function RequestDashboard() {
                   <Label>Additional notes</Label>
                   <Textarea
                     placeholder="Any extra information"
-                    value={form.notes}
-                    onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
                     className="mt-2"
+                    disabled={isBusy}
+                    {...register("notes")}
                   />
+                  {formState.errors.notes && (
+                    <p className="mt-1 text-xs text-destructive">
+                      {formState.errors.notes.message}
+                    </p>
+                  )}
                 </div>
               </>
             )}
 
-            <Button
-              type="submit"
-              className="w-full h-12 text-base font-semibold"
-              disabled={submitRescueRequest.isPending || submitReport.isPending}
-            >
-              {submitRescueRequest.isPending || submitReport.isPending
-                ? "Sending…"
-                : isReportMode
-                  ? "Report Disaster"
-                  : "Request Help"}
+            {formState.errors.root?.message && (
+              <p className="text-sm text-destructive">{formState.errors.root.message}</p>
+            )}
+
+            <Button type="submit" className="w-full h-12 text-base font-semibold" disabled={isBusy}>
+              {isBusy ? "Sending..." : isReportMode ? "Report Disaster" : "Request Help"}
             </Button>
           </form>
         </div>
@@ -349,7 +419,9 @@ export default function RequestDashboard() {
   );
 }
 
-function buildRescuePayload(form: RequestFormState) {
+type SurvivorRequestForm = SurvivorSubmissionInput & { kind: "request" };
+
+function buildRescuePayload(form: SurvivorRequestForm) {
   const baseDetails = form.what.trim() || "Assistance requested";
   const extras = [
     form.notes?.trim() ? `Notes: ${form.notes}` : null,
@@ -367,7 +439,7 @@ function buildRescuePayload(form: RequestFormState) {
   } satisfies Parameters<ReturnType<typeof useSubmitRescueRequestMutation>["mutate"]>[0];
 }
 
-function mapSeverityToPriority(severity: string) {
+function mapSeverityToPriority(severity: SurvivorSubmissionInput["severity"]) {
   switch (severity) {
     case "High":
     case "Critical":

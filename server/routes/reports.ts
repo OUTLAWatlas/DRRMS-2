@@ -2,7 +2,8 @@ import { Router } from "express";
 import { getDb } from "../db";
 import { disasterReports } from "../db/schema";
 import { authMiddleware, AuthRequest, rescuerOnly } from "../middleware/auth";
-import { eq, desc } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { createReportSchema, updateReportSchema } from "../../shared/api";
 import { decryptField, encryptField } from "../security/encryption";
@@ -39,10 +40,34 @@ router.post("/", authMiddleware, requirePermission("reports:create"), async (req
 });
 
 // GET /api/reports - List all (Rescuers only)
-router.get("/", authMiddleware, rescuerOnly, requirePermission("reports:read"), async (_req, res) => {
+router.get("/", authMiddleware, rescuerOnly, requirePermission("reports:read"), async (req, res) => {
   const db = getDb();
-  const all = await db.select().from(disasterReports).orderBy(desc(disasterReports.createdAt));
-  res.json(all.map(deserializeReport));
+  const filters = parseReportListFilters(req.query as Record<string, unknown>);
+  const whereClause = buildReportWhere(filters);
+
+  const baseQuery = db.select().from(disasterReports).orderBy(desc(disasterReports.createdAt));
+  const filteredQuery = whereClause ? baseQuery.where(whereClause) : baseQuery;
+  const limitedQuery = filters.limit ? filteredQuery.limit(filters.limit) : filteredQuery;
+  const paginatedQuery = filters.limit && filters.page ? limitedQuery.offset((filters.page - 1) * filters.limit) : limitedQuery;
+
+  const rows = await paginatedQuery;
+  const payload = rows.map(deserializeReport);
+
+  if (filters.page && filters.limit) {
+    const total = await countReports(db, whereClause);
+    const totalPages = Math.max(1, Math.ceil(total / filters.limit));
+    return res.json({
+      reports: payload,
+      pagination: {
+        page: filters.page,
+        limit: filters.limit,
+        total,
+        totalPages,
+      },
+    });
+  }
+
+  return res.json(payload);
 });
 
 // GET /api/reports/:id - Get single
@@ -127,4 +152,92 @@ function parseDateInput(value?: string | null) {
   if (!value) return undefined;
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+type ReportListFilters = {
+  status?: "pending" | "in_progress" | "resolved" | "rejected";
+  severity?: "Low" | "Moderate" | "High" | "Critical";
+  page?: number;
+  limit?: number;
+};
+
+function parseReportListFilters(query: Record<string, unknown>): ReportListFilters {
+  const status = parseStatus(query["status"]);
+  const severity = parseSeverity(query["severity"]);
+  const page = parsePositiveInt(query["page"], 1, 10_000);
+  let limit = parsePositiveInt(query["limit"], 1, 200) ?? undefined;
+
+  if (page && !limit) {
+    limit = 10;
+  }
+
+  return { status, severity, page, limit };
+}
+
+function buildReportWhere(filters: ReportListFilters): SQL<unknown> | undefined {
+  const conditions: SQL<unknown>[] = [];
+  if (filters.status) {
+    conditions.push(eq(disasterReports.status, filters.status));
+  }
+  if (filters.severity) {
+    conditions.push(eq(disasterReports.severity, filters.severity));
+  }
+  if (!conditions.length) return undefined;
+  return conditions.reduce<SQL<unknown> | undefined>((acc, condition) => (acc ? and(acc, condition) : condition), undefined);
+}
+
+async function countReports(
+  db: Awaited<ReturnType<typeof getDb>>,
+  whereClause: SQL<unknown> | undefined,
+): Promise<number> {
+  const countQuery = db.select({ value: sql<number>`count(*)` }).from(disasterReports);
+  const finalQuery = whereClause ? countQuery.where(whereClause) : countQuery;
+  const result = await finalQuery;
+  return Number(result[0]?.value ?? 0);
+}
+
+function parsePositiveInt(value: unknown, min: number, max: number): number | undefined {
+  const raw = getQueryValue(value);
+  if (!raw) return undefined;
+  const parsed = Number.parseInt(raw, 10);
+  if (Number.isNaN(parsed)) return undefined;
+  const clamped = Math.min(Math.max(parsed, min), max);
+  return clamped;
+}
+
+function parseStatus(value: unknown) {
+  const normalized = getQueryValue(value)?.toLowerCase();
+  if (normalized === "pending" || normalized === "in_progress" || normalized === "resolved" || normalized === "rejected") {
+    return normalized as ReportListFilters["status"];
+  }
+  return undefined;
+}
+
+function parseSeverity(value: unknown) {
+  const normalized = getQueryValue(value)?.toLowerCase();
+  switch (normalized) {
+    case "low":
+      return "Low";
+    case "moderate":
+      return "Moderate";
+    case "high":
+      return "High";
+    case "critical":
+      return "Critical";
+    default:
+      return undefined;
+  }
+}
+
+function getQueryValue(value: unknown): string | undefined {
+  if (Array.isArray(value)) {
+    return value[0];
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value == null) {
+    return undefined;
+  }
+  return String(value);
 }

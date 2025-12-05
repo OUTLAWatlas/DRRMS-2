@@ -1,0 +1,22 @@
+@baseUrl = http://localhost:8080
+@authToken = REPLACE_WITH_JWT
+
+### List high-priority rescue requests (page 1)
+GET {{baseUrl}}/api/rescue-requests?page=1&limit=25&priority=high
+Authorization: Bearer {{authToken}}
+Accept: application/json
+
+### Survivor-scoped rescue requests (page 2, pending only)
+GET {{baseUrl}}/api/rescue-requests?page=2&limit=25&status=pending&userId=REPLACE_WITH_USER_ID
+Authorization: Bearer {{authToken}}
+Accept: application/json
+
+### Warehouse inventory snapshot (warehouse 3)
+GET {{baseUrl}}/api/resources?page=1&limit=50&warehouseId=3
+Authorization: Bearer {{authToken}}
+Accept: application/json
+
+### Paginated disaster reports filtered by severity
+GET {{baseUrl}}/api/reports?page=1&limit=20&severity=high
+Authorization: Bearer {{authToken}}
+Accept: application/json

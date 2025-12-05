@@ -118,9 +118,13 @@ export default function AdminPortal() {
   const predictiveFeedback = usePredictiveFeedbackMutation();
   const demandInsights = useDemandInsightsQuery({ buckets: 12 });
   const schedulerHealth = useSchedulerHealthQuery();
-  const rescueRequests = useGetRescueRequestsQuery();
+  const RESCUE_PAGE_SIZE = 25;
+  const RESOURCE_PAGE_SIZE = 100;
+  const [rescuePage, setRescuePage] = useState(1);
+  const [resourcePage, setResourcePage] = useState(1);
+  const rescueRequests = useGetRescueRequestsQuery({ page: rescuePage, limit: RESCUE_PAGE_SIZE });
   const warehouses = useGetWarehousesQuery();
-  const resources = useGetResourcesQuery();
+  const resources = useGetResourcesQuery({ page: resourcePage, limit: RESOURCE_PAGE_SIZE });
   const currentUserId = useAppStore((s) => s.user?.id);
   const [transactionForm, setTransactionForm] = useState({
     reference: "",
@@ -131,6 +135,18 @@ export default function AdminPortal() {
     requestId: "",
     category: "",
   });
+  const rescuePagination = rescueRequests.data?.pagination;
+  const rescueRequestList = rescueRequests.data?.requests ?? [];
+  const resourcePagination = resources.data?.pagination;
+  const resourceList = resources.data?.resources ?? [];
+  const currentRescuePage = rescuePagination?.page ?? rescuePage;
+  const totalRescuePages = Math.max(1, rescuePagination?.totalPages ?? 1);
+  const canPrevRescuePage = currentRescuePage > 1;
+  const canNextRescuePage = currentRescuePage < totalRescuePages;
+  const currentResourcePage = resourcePagination?.page ?? resourcePage;
+  const totalResourcePages = Math.max(1, resourcePagination?.totalPages ?? 1);
+  const canPrevResourcePage = currentResourcePage > 1;
+  const canNextResourcePage = currentResourcePage < totalResourcePages;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -152,6 +168,18 @@ export default function AdminPortal() {
     window.localStorage.setItem("admin-ledger-category-presets", JSON.stringify(savedCategoryPresets));
   }, [savedCategoryPresets]);
 
+  useEffect(() => {
+    if (rescuePagination?.totalPages && rescuePage > rescuePagination.totalPages) {
+      setRescuePage(Math.max(1, rescuePagination.totalPages));
+    }
+  }, [rescuePage, rescuePagination?.totalPages]);
+
+  useEffect(() => {
+    if (resourcePagination?.totalPages && resourcePage > resourcePagination.totalPages) {
+      setResourcePage(Math.max(1, resourcePagination.totalPages));
+    }
+  }, [resourcePage, resourcePagination?.totalPages]);
+
   const requestStats = useMemo(() => {
     const stats: Record<string, number> = {
       pending: 0,
@@ -159,24 +187,24 @@ export default function AdminPortal() {
       fulfilled: 0,
       cancelled: 0,
     };
-    rescueRequests.data?.forEach((request) => {
+    rescueRequestList.forEach((request) => {
       stats[request.status] = (stats[request.status] ?? 0) + 1;
     });
     return stats;
-  }, [rescueRequests.data]);
+  }, [rescueRequestList]);
 
   const totalWarehouseStock = useMemo(() => {
-    if (!resources.data) return 0;
-    return resources.data.reduce((sum, item) => sum + item.quantity, 0);
-  }, [resources.data]);
+    if (!resourceList.length) return 0;
+    return resourceList.reduce((sum, item) => sum + item.quantity, 0);
+  }, [resourceList]);
 
   const resourceOptions = useMemo(() => {
-    if (!resources.data) return [];
-    return resources.data.map((resource) => ({
+    if (!resourceList.length) return [];
+    return resourceList.map((resource) => ({
       value: resource.id.toString(),
       label: `${resource.type} · WH ${resource.warehouseId ?? "—"}`,
     }));
-  }, [resources.data]);
+  }, [resourceList]);
 
   const transactionCategoryOptions = useMemo(() => {
     if (!transactionSummary.data?.categories) return [];
@@ -819,21 +847,49 @@ export default function AdminPortal() {
           <CardContent>
             {rescueRequests.isLoading ? (
               <Skeleton className="h-32 w-full" />
-            ) : rescueRequests.data?.length ? (
-              <div className="space-y-4">
-                {rescueRequests.data.slice(0, 5).map((request) => (
-                  <div key={request.id} className="rounded-lg border p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-semibold">Request #{request.id}</p>
-                        <p className="text-sm text-muted-foreground">{request.location}</p>
-                      </div>
-                      <Badge className={cn("capitalize", statusStyles[request.status])}>{request.status.replace("_", " ")}</Badge>
-                    </div>
-                    <p className="text-sm mt-3 text-muted-foreground">{request.details}</p>
+            ) : rescueRequests.error ? (
+              <p className="text-sm text-red-500">Unable to load rescue requests.</p>
+            ) : rescueRequestList.length ? (
+              <>
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>
+                    Page {currentRescuePage} / {totalRescuePages}
+                    {rescuePagination?.total != null ? ` • Total: ${rescuePagination.total}` : ""}
+                  </span>
+                  <div className="flex gap-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!canPrevRescuePage || rescueRequests.isFetching}
+                      onClick={() => setRescuePage((prev) => Math.max(1, prev - 1))}
+                    >
+                      Prev
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!canNextRescuePage || rescueRequests.isFetching}
+                      onClick={() => setRescuePage((prev) => Math.min(totalRescuePages, prev + 1))}
+                    >
+                      Next
+                    </Button>
                   </div>
-                ))}
-              </div>
+                </div>
+                <div className="space-y-4">
+                  {rescueRequestList.slice(0, 5).map((request) => (
+                    <div key={request.id} className="rounded-lg border p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-semibold">Request #{request.id}</p>
+                          <p className="text-sm text-muted-foreground">{request.location}</p>
+                        </div>
+                        <Badge className={cn("capitalize", statusStyles[request.status])}>{request.status.replace("_", " ")}</Badge>
+                      </div>
+                      <p className="text-sm mt-3 text-muted-foreground">{request.details}</p>
+                    </div>
+                  ))}
+                </div>
+              </>
             ) : (
               <p className="text-sm text-muted-foreground">No active requests were found.</p>
             )}
@@ -848,26 +904,54 @@ export default function AdminPortal() {
           <CardContent>
             {resources.isLoading ? (
               <Skeleton className="h-32 w-full" />
-            ) : resources.data?.length ? (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Resource</TableHead>
-                    <TableHead className="text-right">Quantity</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {resources.data.slice(0, 6).map((resource) => (
-                    <TableRow key={resource.id}>
-                      <TableCell>
-                        <p className="font-medium">{resource.type}</p>
-                        <p className="text-xs text-muted-foreground">Warehouse #{resource.warehouseId}</p>
-                      </TableCell>
-                      <TableCell className="text-right font-semibold">{resource.quantity.toLocaleString()}</TableCell>
+            ) : resources.error ? (
+              <p className="text-sm text-red-500">Unable to load resources.</p>
+            ) : resourceList.length ? (
+              <>
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>
+                    Page {currentResourcePage} / {totalResourcePages}
+                    {resourcePagination?.total != null ? ` • Total: ${resourcePagination.total}` : ""}
+                  </span>
+                  <div className="flex gap-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!canPrevResourcePage || resources.isFetching}
+                      onClick={() => setResourcePage((prev) => Math.max(1, prev - 1))}
+                    >
+                      Prev
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!canNextResourcePage || resources.isFetching}
+                      onClick={() => setResourcePage((prev) => Math.min(totalResourcePages, prev + 1))}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Resource</TableHead>
+                      <TableHead className="text-right">Quantity</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {resourceList.slice(0, 6).map((resource) => (
+                      <TableRow key={resource.id}>
+                        <TableCell>
+                          <p className="font-medium">{resource.type}</p>
+                          <p className="text-xs text-muted-foreground">Warehouse #{resource.warehouseId}</p>
+                        </TableCell>
+                        <TableCell className="text-right font-semibold">{resource.quantity.toLocaleString()}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </>
             ) : (
               <p className="text-sm text-muted-foreground">No resource records available.</p>
             )}

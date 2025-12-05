@@ -35,6 +35,12 @@ const schedulerDefinitions: SchedulerDefinition[] = [
     expectedIntervalMs: readInterval(process.env.LIVE_FEED_REFRESH_INTERVAL_MS, 5 * 60 * 1000),
   },
   {
+    name: "provider_health_ingestor",
+    label: "Provider health feed",
+    description: "Normalizes provider uptime + roster telemetry",
+    expectedIntervalMs: readInterval(process.env.PROVIDER_HEALTH_REFRESH_INTERVAL_MS, 30 * 1000),
+  },
+  {
     name: "transparency_reporter",
     label: "Transparency reporter",
     description: "Seals immutable audit summaries for compliance",

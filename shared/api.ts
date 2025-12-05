@@ -6,6 +6,56 @@
 
 import { z } from "zod";
 
+const normalizeOptionalNumberInput = (value: unknown) => {
+  if (value === "" || value === null || value === undefined) return undefined;
+  if (typeof value === "number") return value;
+  if (typeof value === "string") {
+    const parsed = Number(value.trim());
+    return Number.isFinite(parsed) ? parsed : value;
+  }
+  return value;
+};
+
+const normalizeRequiredNumberInput = (value: unknown) => {
+  if (typeof value === "number") return value;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : value;
+  }
+  return value;
+};
+
+const normalizeOptionalDateTimeInput = (value: unknown) => {
+  if (value === "" || value === null || value === undefined) return undefined;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    const date = new Date(trimmed);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toISOString();
+    }
+    return value;
+  }
+  return value;
+};
+
+const optionalNonNegativeIntField = () =>
+  z.preprocess(normalizeOptionalNumberInput, z.number().int().nonnegative().optional());
+
+const optionalPositiveIntField = () =>
+  z.preprocess(normalizeOptionalNumberInput, z.number().int().positive().optional());
+
+const requiredPositiveIntField = (requiredError: string) =>
+  z.preprocess(
+    normalizeRequiredNumberInput,
+    z.number({ required_error: requiredError }).int().positive(),
+  );
+
+const optionalDateTimeField = () =>
+  z.preprocess(normalizeOptionalDateTimeInput, z.string().datetime().optional());
+
 /**
  * Example response type for /api/demo
  */
@@ -178,6 +228,104 @@ export const createDistributionLogSchema = z.object({
 });
 
 // -----------------------------
+// UI Form Schemas
+// -----------------------------
+export const survivorSubmissionSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("request"),
+    what: z.string().min(1, "Describe what help you need"),
+    where: z.string().min(1, "Location is required"),
+    severity: z.enum(["Low", "Moderate", "High", "Critical"]),
+    when: z.string().optional(),
+    people: z.coerce.number().int().min(1, "At least one person"),
+    resourcesRequired: z.coerce.number().int().min(1, "Resources required"),
+    contact: z.string().min(3, "Provide a contact").max(120).optional(),
+    notes: z.string().max(500).optional(),
+  }),
+  z.object({
+    kind: z.literal("report"),
+    what: z.string().min(1, "Describe what happened"),
+    where: z.string().min(1, "Location is required"),
+    severity: z.enum(["Low", "Moderate", "High", "Critical"]),
+    when: z.string().optional(),
+    people: z.coerce.number().int().min(1, "At least one person"),
+    contact: z.string().min(3, "Provide a contact").max(120).optional(),
+    notes: z.string().max(500).optional(),
+  }),
+]);
+
+export const createWarehouseFormSchema = z.object({
+  name: z.string().min(1, "Name is required"),
+  location: z.string().min(1, "Location is required"),
+  capacity: optionalNonNegativeIntField(),
+  lastAuditedAt: optionalDateTimeField(),
+});
+
+export const updateWarehouseFormSchema = z
+  .object({
+    warehouseId: requiredPositiveIntField("Select a warehouse"),
+    name: z.string().min(1).optional(),
+    location: z.string().min(1).optional(),
+    capacity: optionalNonNegativeIntField(),
+    lastAuditedAt: optionalDateTimeField(),
+  })
+  .refine(
+    (data) => Boolean(data.name || data.location || data.capacity != null || data.lastAuditedAt),
+    {
+      message: "Provide at least one field to update",
+      path: ["root"],
+    },
+  );
+
+export const createResourceFormSchema = z.object({
+  type: z.string().min(1, "Resource type is required"),
+  quantity: requiredPositiveIntField("Quantity is required"),
+  warehouseId: requiredPositiveIntField("Select a warehouse"),
+  unit: z.string().min(1).optional(),
+  reorderLevel: optionalNonNegativeIntField(),
+});
+
+export const updateResourceFormSchema = z
+  .object({
+    resourceId: requiredPositiveIntField("Select a resource"),
+    type: z.string().min(1).optional(),
+    quantity: optionalNonNegativeIntField(),
+    warehouseId: optionalPositiveIntField(),
+    unit: z.string().min(1).optional(),
+    reorderLevel: optionalNonNegativeIntField(),
+  })
+  .refine(
+    (data) =>
+      Boolean(
+        data.type ||
+          data.quantity != null ||
+          data.warehouseId != null ||
+          data.unit ||
+          data.reorderLevel != null,
+      ),
+    {
+      message: "Provide at least one field to update",
+      path: ["root"],
+    },
+  );
+
+export const resourceTransferFormSchema = z.object({
+  resourceId: requiredPositiveIntField("Select a resource"),
+  toWarehouseId: requiredPositiveIntField("Select destination"),
+  quantity: requiredPositiveIntField("Quantity is required"),
+  note: z.string().max(280).optional(),
+});
+
+export const distributionLogFormSchema = z.object({
+  resourceId: requiredPositiveIntField("Select a resource"),
+  warehouseId: requiredPositiveIntField("Select source warehouse"),
+  quantity: requiredPositiveIntField("Quantity is required"),
+  destination: z.string().min(1, "Destination is required"),
+  requestId: optionalPositiveIntField(),
+  notes: z.string().max(280).optional(),
+});
+
+// -----------------------------
 // Allocations Schemas
 // -----------------------------
 export const createAllocationSchema = z.object({
@@ -216,6 +364,13 @@ export type UpdateResourceInput = z.infer<typeof updateResourceSchema>;
 export type CreateAllocationInput = z.infer<typeof createAllocationSchema>;
 export type CreateResourceTransferInput = z.infer<typeof createResourceTransferSchema>;
 export type CreateDistributionLogInput = z.infer<typeof createDistributionLogSchema>;
+export type SurvivorSubmissionInput = z.infer<typeof survivorSubmissionSchema>;
+export type CreateWarehouseFormInput = z.infer<typeof createWarehouseFormSchema>;
+export type UpdateWarehouseFormInput = z.infer<typeof updateWarehouseFormSchema>;
+export type CreateResourceFormInput = z.infer<typeof createResourceFormSchema>;
+export type UpdateResourceFormInput = z.infer<typeof updateResourceFormSchema>;
+export type ResourceTransferFormInput = z.infer<typeof resourceTransferFormSchema>;
+export type DistributionLogFormInput = z.infer<typeof distributionLogFormSchema>;
 
 // -----------------------------
 // Response Types (from DB schema)
@@ -360,6 +515,39 @@ export type ResourceAllocation = {
   latitude: number | null;
   longitude: number | null;
   allocatedAt: number;
+};
+
+export type PaginationMeta = {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+};
+
+export type PaginatedReportsResponse = {
+  reports: DisasterReport[];
+  pagination: PaginationMeta;
+};
+
+export type PaginatedRescueRequestsResponse = {
+  requests: RescueRequest[];
+  pagination: PaginationMeta;
+};
+
+export type PaginatedResourcesResponse = {
+  resources: Resource[];
+  pagination: PaginationMeta;
+};
+
+export type LowStockResourcesResponse = {
+  resources: Resource[];
+  meta: {
+    limit: number;
+    total: number;
+    warehouseId?: number;
+    includeDepleted: boolean;
+    buffer: number;
+  };
 };
 
 export type PrioritySnapshot = {
@@ -548,6 +736,92 @@ export type LiveFeedRefreshResponse = {
   refreshedAt: number;
 };
 
+export type ProviderHealthStatus = "healthy" | "elevated" | "degraded" | "critical" | "offline";
+
+export type ProviderFreshnessState = "fresh" | "stale" | "unknown";
+
+export type ProviderHealthEventType = "status_change" | "sla_breach" | "roster_update" | "ping_timeout";
+
+export type ProviderHealthEventSeverity = "info" | "warning" | "critical";
+
+export type ProviderHealthSnapshot = {
+  id: number;
+  providerId: string;
+  providerName: string;
+  status: ProviderHealthStatus;
+  uptimePercent: number | null;
+  latencyMs: number | null;
+  activeIncidents: number;
+  slaTier: string | null;
+  coverageRegion: string | null;
+  coverageRadiusKm: number | null;
+  latitude: number | null;
+  longitude: number | null;
+  lastPingAt: number | null;
+  freshnessState: ProviderFreshnessState;
+  dataSources: string[];
+  metadata: Record<string, unknown> | null;
+  observedAt: number;
+  createdAt: number;
+  rosterLead: string | null;
+  rosterContact: string | null;
+  rosterShiftStartsAt: number | null;
+  rosterShiftEndsAt: number | null;
+};
+
+export type ProviderOnCallRoster = {
+  id: number;
+  providerId: string;
+  providerName: string;
+  shiftOwner: string;
+  role: string | null;
+  contactChannel: string | null;
+  escalationPolicy: string | null;
+  shiftStartsAt: number | null;
+  shiftEndsAt: number | null;
+  coverageNotes: string | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: number;
+};
+
+export type ProviderHealthEvent = {
+  id: number;
+  providerId: string;
+  providerName: string;
+  eventType: ProviderHealthEventType;
+  previousStatus: ProviderHealthStatus | null;
+  nextStatus: ProviderHealthStatus | null;
+  severity: ProviderHealthEventSeverity;
+  message: string;
+  metadata: Record<string, unknown> | null;
+  observedAt: number;
+  createdAt: number;
+};
+
+export type ProviderHealthResponse = {
+  featureEnabled: boolean;
+  snapshots: ProviderHealthSnapshot[];
+  events: ProviderHealthEvent[];
+  lastIngestedAt: number | null;
+};
+
+export type ProviderHealthStreamEvent =
+  | { kind: "snapshot"; payload: ProviderHealthSnapshot }
+  | { kind: "event"; payload: ProviderHealthEvent }
+  | { kind: "roster"; payload: ProviderOnCallRoster }
+  | { kind: "heartbeat"; payload: { timestamp: number } }
+  | { kind: "bootstrap"; payload: { snapshots: ProviderHealthSnapshot[]; events: ProviderHealthEvent[]; timestamp: number } };
+
+export type ProviderHealthIngestResponse = {
+  ingested: number;
+  events: number;
+  rosters: number;
+  updatedProviders: string[];
+  featureEnabled: boolean;
+  skipped: boolean;
+  reason?: string;
+};
+
 export type GeoRequestPoint = {
   id: number;
   latitude: number;
@@ -708,6 +982,7 @@ export type SchedulerName =
   | "demand_snapshotter"
   | "predictive_allocation"
   | "live_feed_refresh"
+  | "provider_health_ingestor"
   | "transparency_reporter";
 
 export type SchedulerHealthStatus = "healthy" | "warning" | "critical";
@@ -776,4 +1051,31 @@ export type TransparencyReportRecord = {
   signature: string | null;
   status: string;
   metadata: string | null;
+};
+
+export const appendTransparencyLedgerEntrySchema = z.object({
+  entryType: z.string().min(3).max(64),
+  payload: z.unknown().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+export type AppendTransparencyLedgerEntryInput = z.infer<typeof appendTransparencyLedgerEntrySchema>;
+
+export type TransparencyLedgerEntry = {
+  id: number;
+  entryType: string;
+  payload: unknown;
+  payloadHash: string;
+  previousHash: string | null;
+  entryHash: string;
+  signature: string | null;
+  createdAt: number;
+  actorId: number | null;
+  metadata: Record<string, unknown> | null;
+  verified: boolean;
+};
+
+export type TransparencyLedgerResponse = {
+  entries: TransparencyLedgerEntry[];
+  latestHash: string | null;
 };

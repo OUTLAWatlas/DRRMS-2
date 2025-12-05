@@ -3,7 +3,7 @@ import { getDb } from "../db";
 import { allocationHistory, resourceAllocations, resources, rescueRequests, warehouses, users } from "../db/schema";
 import { authMiddleware, AuthRequest, rescuerOnly } from "../middleware/auth";
 import type { SQL } from "drizzle-orm";
-import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { createAllocationSchema } from "../../shared/api";
 
@@ -13,13 +13,14 @@ const router = Router();
 router.post("/", authMiddleware, rescuerOnly, async (req: AuthRequest, res) => {
   try {
     const validatedData = createAllocationSchema.parse(req.body);
-    const { requestId, resources: requestedResources } = validatedData;
+    const { requestId, resources: requestedResources, clientRequestId } = validatedData;
 
     // Basic checks
     const db = getDb();
     const reqRows = await db.select().from(rescueRequests).where(eq(rescueRequests.id, requestId));
     if (reqRows.length === 0) return res.status(400).json({ error: "Rescue request does not exist" });
     const request = reqRows[0];
+    const createdAllocations: Array<{ record: typeof resourceAllocations.$inferSelect; clientRequestId?: string }> = [];
 
     // Transaction to ensure atomicity
     await db.transaction(async (tx) => {
@@ -48,10 +49,17 @@ router.post("/", authMiddleware, rescuerOnly, async (req: AuthRequest, res) => {
           })
           .returning();
 
+        createdAllocations.push({ record: allocation, clientRequestId: resReq.clientRequestId });
+
         // 3. Decrement resource quantity
+        const resourceTimestamp = Date.now();
         await tx
           .update(resources)
-          .set({ quantity: sql`${resources.quantity} - ${resReq.quantity}` })
+          .set({
+            quantity: sql`${resources.quantity} - ${resReq.quantity}`,
+            updatedAt: resourceTimestamp,
+            version: sql`${resources.version} + 1`,
+          })
           .where(eq(resources.id, resReq.resourceId));
 
         await tx.insert(allocationHistory).values({
@@ -65,13 +73,27 @@ router.post("/", authMiddleware, rescuerOnly, async (req: AuthRequest, res) => {
         });
       }
 
+      const statusTimestamp = Date.now();
       await tx
         .update(rescueRequests)
-        .set({ status: "in_progress" })
+        .set({
+          status: "in_progress",
+          updatedAt: statusTimestamp,
+          version: sql`${rescueRequests.version} + 1`,
+        })
         .where(eq(rescueRequests.id, requestId));
     });
 
-    res.status(201).json({ message: "Resources allocated successfully" });
+    const allocationsResponse = createdAllocations.map(({ record, clientRequestId }) =>
+      buildMutationResponse(record, clientRequestId),
+    );
+    const responsePayload: { allocations: typeof allocationsResponse; clientRequestId?: string } = {
+      allocations: allocationsResponse,
+    };
+    if (clientRequestId) {
+      responsePayload.clientRequestId = clientRequestId;
+    }
+    res.status(201).json(responsePayload);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: "Invalid allocation data", details: error.errors });
@@ -82,12 +104,14 @@ router.post("/", authMiddleware, rescuerOnly, async (req: AuthRequest, res) => {
 });
 
 // GET /api/allocations - List all allocations (Rescuers only)
-router.get("/", authMiddleware, rescuerOnly, async (_req, res) => {
+router.get("/", authMiddleware, rescuerOnly, async (req, res) => {
+  const updatedAfter = parseTimestamp(req.query["updatedAfter"] ?? req.query["updated_after"]);
   const db = getDb();
-  const allocations = await db
-    .select()
-    .from(resourceAllocations)
-    .orderBy(desc(resourceAllocations.allocatedAt));
+  let query = db.select().from(resourceAllocations).orderBy(desc(resourceAllocations.allocatedAt));
+  if (updatedAfter) {
+    query = query.where(gt(resourceAllocations.updatedAt, updatedAfter));
+  }
+  const allocations = await query;
   res.json(allocations);
 });
 
@@ -294,6 +318,21 @@ function getQueryValue(value: unknown): string | undefined {
     return undefined;
   }
   return String(value);
+}
+
+function parseTimestamp(value: unknown) {
+  const raw = getQueryValue(value);
+  if (!raw) return undefined;
+  const numeric = Number(raw);
+  if (!Number.isNaN(numeric) && Number.isFinite(numeric)) {
+    return numeric;
+  }
+  const parsed = Date.parse(raw);
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+function buildMutationResponse<T>(record: T, clientRequestId?: string) {
+  return clientRequestId ? { record, clientRequestId } : { record };
 }
 
 function escapeCsvValue(value: string): string {

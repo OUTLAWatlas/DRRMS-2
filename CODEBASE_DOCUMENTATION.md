@@ -189,6 +189,43 @@ Detects mobile viewport for responsive behavior.
 #### `use-toast.ts`
 Manages toast notification state and provides toast triggering functions.
 
+#### `use-list-params.ts`
+Namespace-aware helper that keeps pagination/filter state in sync with the URL. It serializes primitives, strips defaults to keep links clean, and exposes `params`, `setParams`, and `resetParams` so every table can share/bookmarkable state without duplicating logic.
+
+#### `use-table-state.ts`
+Thin wrapper around `use-list-params` that bundles page, limit, sort, and arbitrary filter definitions into a single hook. Components call `setPage`, `setLimit`, `setSort`, or `setFilters` instead of juggling multiple `useState` calls, and the hook returns a ready-to-use `query` object for TanStack Query.
+
+#### `use-debounced-value.ts`
+Generic debounce utility that delays propagating rapid input changes. `DebouncedSearchInput` uses it to avoid hammering the backend/UI when operators type quickly.
+
+#### `use-zod-form.ts`
+Small helper that composes React Hook Form with Zod schemas so every form (dispatch logs, transfers, etc.) shares consistent validation, error formatting, and default handling.
+
+### Form & Data Patterns
+
+#### Unified forms with `useZodForm`
+- Wraps `useForm` with a Zod resolver so schemas drive both validation and TypeScript inference.
+- Encourages colocating `defaultValues` with the schema so resetting a form (e.g., dispatch logs) is a single call to `form.reset()`.
+- Exposes the untouched React Hook Form instance, letting you plug the same helper into wizard-style or modal forms without extra adapters.
+
+#### Table state orchestration
+- Pair `use-table-state` with `DebouncedSearchInput`, `StatusPills`, or dropdown filters to keep page/limit/sort/filter updates declarative.
+- The hook’s `query` field can be spread directly into TanStack Query fetch params, guaranteeing consistency between UI state and API calls.
+- Because it piggybacks on `use-list-params`, refreshing or sharing the URL preserves operator context automatically.
+
+#### Optimistic update workflow
+1. Use TanStack Query’s `useMutation` with an `onMutate` handler that snapshots existing cache via `queryClient.getQueryData`.
+2. Immediately call `queryClient.setQueryData` (or `setQueriesData`) to reflect the optimistic change in tables or summary badges.
+3. Roll back inside `onError` by restoring the snapshot, surface the error via `toast.error`, and optionally set a form-level error through `form.setError`.
+4. In `onSettled`, refetch or invalidate the affected queries so the server remains the source of truth.
+5. For write-heavy views (dispatch logs, transfers), keep optimistic payloads lightweight—only update the slices of cache the operator is currently looking at.
+
+#### Testing guidelines
+- **Hooks**: use `@testing-library/react`’s `renderHook` with `MemoryRouter` to exercise `use-list-params`/`use-table-state`. Provide a fake `URLSearchParams` seed so pagination and filters can be asserted deterministically.
+- **Debounce logic**: wrap tests in `vi.useFakeTimers()`, fire rapid `setDraft` changes, fast-forward with `vi.advanceTimersByTime`, and assert the final `onCommit` calls.
+- **Forms + optimistic mutations**: render the form inside a custom `QueryClientProvider` + `ReactHookForm` wrapper, stub API calls with Vitest spies or MSW, and assert that `queryClient.setQueryData` receives the optimistic payload before the mocked network resolves.
+- **Edge cases**: add regression tests for resetting filters, clearing URL params, and rolling back optimistic updates to guarantee operators never see stale badge counts.
+
 ---
 
 ## Pages & Routing

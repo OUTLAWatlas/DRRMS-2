@@ -158,7 +158,12 @@ router.post("/recalculate", authMiddleware, rescuerOnly, async (_req, res) => {
       const evaluation = evaluateRequestPriority(request, resourcePool, context, nowDate);
       await tx
         .update(rescueRequests)
-        .set({ criticalityScore: evaluation.score, lastScoredAt: nowMs })
+        .set({
+          criticalityScore: evaluation.score,
+          lastScoredAt: nowMs,
+          updatedAt: nowMs,
+          version: sql`${rescueRequests.version} + 1`,
+        })
         .where(eq(rescueRequests.id, request.id));
 
       await tx.insert(requestPrioritySnapshots).values({
@@ -260,7 +265,11 @@ router.post("/recommendations/:id/apply", authMiddleware, rescuerOnly, async (re
 
     await tx
       .update(resources)
-      .set({ quantity: sql`${resources.quantity} - ${recommendation.quantity!}` })
+      .set({
+        quantity: sql`${resources.quantity} - ${recommendation.quantity!}`,
+        updatedAt: timestampMs,
+        version: sql`${resources.version} + 1`,
+      })
       .where(eq(resources.id, recommendation.resourceId!));
 
     await tx.insert(allocationHistory).values({
@@ -281,7 +290,11 @@ router.post("/recommendations/:id/apply", authMiddleware, rescuerOnly, async (re
 
     await tx
       .update(rescueRequests)
-      .set({ status: "in_progress", updatedAt: timestampMs })
+      .set({
+        status: "in_progress",
+        updatedAt: timestampMs,
+        version: sql`${rescueRequests.version} + 1`,
+      })
       .where(eq(rescueRequests.id, recommendation.requestId));
   });
 

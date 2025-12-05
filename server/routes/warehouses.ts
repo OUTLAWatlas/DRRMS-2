@@ -3,11 +3,12 @@ import { getDb } from "../db";
 import { warehouses, resources } from "../db/schema";
 import { authMiddleware, rescuerOnly } from "../middleware/auth";
 import { eq, desc } from "drizzle-orm";
-import { createWarehouseSchema, updateWarehouseSchema } from "../../shared/api";
+import { createResourceSchema, createWarehouseSchema, updateWarehouseSchema } from "../../shared/api";
 import { z } from "zod";
 import { requirePermission } from "../security/permissions";
 
 const router = Router();
+const warehouseResourceSchema = createResourceSchema.omit({ warehouseId: true });
 
 // GET /api/warehouses - List all
 router.get("/", authMiddleware, requirePermission("warehouses:read"), async (_req, res) => {
@@ -107,6 +108,46 @@ router.get("/:id/inventory", authMiddleware, requirePermission("warehouses:read"
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
+router.post(
+  "/:id/resources",
+  authMiddleware,
+  rescuerOnly,
+  requirePermission("resources:write"),
+  async (req, res) => {
+    try {
+      const warehouseId = parseInt(req.params.id);
+      if (isNaN(warehouseId)) {
+        return res.status(400).json({ error: "Invalid warehouse ID" });
+      }
+
+      const payload = warehouseResourceSchema.parse(req.body);
+      const db = getDb();
+      const warehouseExists = await db.select({ id: warehouses.id }).from(warehouses).where(eq(warehouses.id, warehouseId)).limit(1);
+      if (warehouseExists.length === 0) {
+        return res.status(404).json({ error: "Warehouse not found" });
+      }
+
+      const [created] = await db
+        .insert(resources)
+        .values({
+          warehouseId,
+          type: payload.type,
+          quantity: payload.quantity,
+          unit: payload.unit ?? "units",
+          reorderLevel: payload.reorderLevel ?? 0,
+        })
+        .returning();
+
+      res.status(201).json(created);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid resource data", details: error.errors });
+      }
+      res.status(500).json({ error: "Internal server error" });
+    }
+  },
+);
 
 export default router;
 
