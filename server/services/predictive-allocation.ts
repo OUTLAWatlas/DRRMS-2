@@ -95,8 +95,8 @@ export async function runPredictiveAllocationCycle(now = new Date()) {
         runType: "inference",
         status: "completed",
         metricsJson: JSON.stringify({ driver: "stub" }),
-        startedAt: now,
-        completedAt: now,
+        startedAt: nowMs,
+        completedAt: nowMs,
       })
       .returning();
 
@@ -137,7 +137,7 @@ export async function runPredictiveAllocationCycle(now = new Date()) {
         .insert(requestFeatureSnapshots)
         .values({
           requestId: request.id,
-          snapshotAt: now,
+          snapshotAt: nowMs,
           peopleCount: request.peopleCount,
           priority: request.priority,
           severityScore: request.criticalityScore,
@@ -159,8 +159,8 @@ export async function runPredictiveAllocationCycle(now = new Date()) {
         rationale: recommendation.rationale,
         modelRunId: modelRun?.id ?? null,
         featureSnapshotId: feature?.id ?? null,
-        validFrom: now,
-        validUntil: new Date(nowMs + 2 * 60 * 60 * 1000),
+        validFrom: nowMs,
+        validUntil: nowMs + 2 * 60 * 60 * 1000,
       });
     }
     success = true;
@@ -205,14 +205,14 @@ async function loadRegionDemandStats(db: ReturnType<typeof getDb>, requests: typ
 
   if (!regions.size) return new Map<string, RegionDemandStats>();
 
-  const since = new Date(now.getTime() - DEMAND_LOOKBACK_MS);
+  const sinceMs = now.getTime() - DEMAND_LOOKBACK_MS;
   const rows = await db
     .select()
     .from(demandFeatureSnapshots)
     .where(
       and(
         inArray(demandFeatureSnapshots.region, Array.from(regions)),
-        gte(demandFeatureSnapshots.bucketEnd, since),
+        gte(demandFeatureSnapshots.bucketEnd, sinceMs),
       ),
     );
 
@@ -264,7 +264,7 @@ async function loadRegionDemandStats(db: ReturnType<typeof getDb>, requests: typ
     current.precipSum += row.precipitationMm ?? 0;
     current.windSum += row.windSpeedKph ?? 0;
     current.humiditySum += row.humidity ?? 0;
-    const bucketEndMs = row.bucketEnd instanceof Date ? row.bucketEnd.getTime() : 0;
+    const bucketEndMs = typeof row.bucketEnd === "number" ? row.bucketEnd : 0;
     if (bucketEndMs >= current.latestBucket) {
       current.weatherAlertLevel = row.weatherAlertLevel ?? current.weatherAlertLevel;
       current.latestBucket = bucketEndMs;

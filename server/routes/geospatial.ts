@@ -93,8 +93,7 @@ router.get("/overview", authMiddleware, rescuerOnly, async (_req, res) => {
 router.get("/heatmap", authMiddleware, rescuerOnly, async (req, res) => {
   const bucketSize = req.query.bucket ? Math.max(0.05, parseFloat(String(req.query.bucket))) : 0.25;
   const windowHours = req.query.window ? Math.max(1, parseInt(String(req.query.window), 10)) : 24;
-  const since = Date.now() - windowHours * 60 * 60 * 1000;
-  const sinceDate = new Date(since);
+  const sinceMs = Date.now() - windowHours * 60 * 60 * 1000;
   const db = getDb();
   const rows = await db
     .select({
@@ -106,7 +105,7 @@ router.get("/heatmap", authMiddleware, rescuerOnly, async (req, res) => {
     .from(rescueRequests)
     .where(
       and(
-        gte(rescueRequests.createdAt, sinceDate),
+        gte(rescueRequests.createdAt, sinceMs),
         sql`${rescueRequests.latitude} IS NOT NULL`,
         sql`${rescueRequests.longitude} IS NOT NULL`,
       ),

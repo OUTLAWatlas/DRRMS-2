@@ -45,7 +45,7 @@ class MockWeatherProvider implements WeatherProvider {
       condition: idx % 2 === 0 ? "Scattered showers" : "Humid",
       alertLevel: idx % 2 === 0 ? "watch" : "normal",
       source: "mock",
-      recordedAt: new Date(now - idx * 15 * 60 * 1000),
+      recordedAt: now - idx * 15 * 60 * 1000,
     }));
   }
 }
@@ -87,7 +87,7 @@ class OpenWeatherProvider implements WeatherProvider {
           condition: data?.weather?.[0]?.description ?? null,
           alertLevel: mapAlertLevel(data),
           source: "openweather",
-          recordedAt: new Date(data?.dt ? data.dt * 1000 : Date.now()),
+          recordedAt: typeof data?.dt === "number" ? data.dt * 1000 : Date.now(),
         });
       } catch (error) {
         console.warn("Weather provider failed, falling back to mock value", error);
@@ -120,7 +120,7 @@ class OpenMeteoProvider implements WeatherProvider {
         if (!response.ok) throw new Error(`Open-Meteo returned ${response.status}`);
         const data = (await response.json()) as any;
         const current = data?.current;
-        const recordedAt = current?.time ? new Date(current.time) : new Date();
+        const recordedAt = current?.time ? Date.parse(current.time) : Date.now();
         readings.push({
           locationName: current?.time ? `${loc.locationName}` : loc.locationName,
           latitude: loc.latitude,
@@ -164,8 +164,8 @@ class MockAlertProvider implements AlertProvider {
         certainty: "Likely",
         urgency: "Immediate",
         source: "mock",
-        issuedAt: new Date(now),
-        expiresAt: new Date(now + 4 * 60 * 60 * 1000),
+        issuedAt: now,
+        expiresAt: now + 4 * 60 * 60 * 1000,
         summary: "Heavy rainfall expected. Pre-position resources near coastal districts.",
         rawPayload: null,
         status: "active",
@@ -196,8 +196,8 @@ class FeedAlertProvider implements AlertProvider {
           certainty: null,
           urgency: null,
           source: this.feedUrl,
-          issuedAt: new Date(issued),
-          expiresAt: new Date(issued + 6 * 60 * 60 * 1000),
+          issuedAt: issued,
+          expiresAt: issued + 6 * 60 * 60 * 1000,
           summary: "Raw feed data ingested. See payload for specifics.",
           rawPayload: payload,
           status: "active",
@@ -236,8 +236,8 @@ class WeatherGovAlertProvider implements AlertProvider {
     const features: any[] = data?.features ?? [];
     return features.map((feature) => {
       const props = feature?.properties ?? {};
-      const issuedAt = props.sent ? new Date(props.sent) : null;
-      const expiresAt = props.expires ? new Date(props.expires) : null;
+      const issuedAt = props.sent ? Date.parse(props.sent) : null;
+      const expiresAt = props.expires ? Date.parse(props.expires) : null;
       return {
         externalId: feature?.id ?? createHash("sha1").update(JSON.stringify(feature)).digest("hex"),
         headline: props.headline ?? props.event ?? "Weather alert",
@@ -367,7 +367,7 @@ export async function refreshLiveFeeds(now = new Date()) {
     await db.insert(liveWeatherReadings).values(weatherReadings);
     await db
       .delete(liveWeatherReadings)
-      .where(lt(liveWeatherReadings.recordedAt, new Date(now.getTime() - WEATHER_RETENTION_MS)));
+      .where(lt(liveWeatherReadings.recordedAt, now.getTime() - WEATHER_RETENTION_MS));
   }
 
   if (alerts.length) {
@@ -394,7 +394,7 @@ export async function refreshLiveFeeds(now = new Date()) {
     }
     await db
       .delete(governmentAlerts)
-      .where(lt(governmentAlerts.issuedAt, new Date(now.getTime() - ALERT_RETENTION_MS)));
+      .where(lt(governmentAlerts.issuedAt, now.getTime() - ALERT_RETENTION_MS));
   }
 
   const result = {
