@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Label } from "@/components/ui/label";
 import { DemandHeatmapGrid, DemandTrendChart } from "@/components/DemandSignals";
 import {
   useLiveWeatherQuery,
@@ -15,12 +16,15 @@ import {
   useCreateDistributionLogMutation,
   useUpdateResourceMutation,
 } from "@/hooks/api-hooks";
-import type { GovernmentAlert, RescueRequest, Resource } from "@shared/api";
+import type { GovernmentAlert, RescueRequest, Resource, Warehouse } from "@shared/api";
 import { AlertTriangle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 type NotificationEntry = { id: string; message: string; area?: string; createdAt: number };
+
+const CITY_RADIUS_KM = 45;
+const NEIGHBOR_RADIUS_KM = 120;
 
 export default function RescuePortal() {
   const liveWeather = useLiveWeatherQuery();
@@ -38,19 +42,39 @@ export default function RescuePortal() {
     () => requests.filter((r) => r.status === "pending" || r.status === "in_progress"),
     [requests],
   );
-  const activeRequest = openRequests[0];
+  const warehouses = warehousesQuery.data ?? [];
+  const [selectedHubId, setSelectedHubId] = useState<number | null>(null);
+  useEffect(() => {
+    if (selectedHubId == null && warehouses.length > 0) {
+      setSelectedHubId(warehouses[0].id);
+    }
+  }, [selectedHubId, warehouses]);
+  const selectedWarehouse = useMemo(() => warehouses.find((w) => w.id === selectedHubId) ?? null, [warehouses, selectedHubId]);
+  const filteredRequests = useMemo(
+    () => filterRequestsByHub(openRequests, selectedWarehouse),
+    [openRequests, selectedWarehouse],
+  );
+  const activeRequests = useMemo(
+    () => filteredRequests.filter((r) => r.status === "in_progress"),
+    [filteredRequests],
+  );
+  const primaryActiveRequest = activeRequests[0] ?? null;
+  const pendingRequests = useMemo(
+    () => filteredRequests.filter((r) => r.status === "pending"),
+    [filteredRequests],
+  );
   const highlightedAlert = useMemo(() => selectHighestSeverityAlert(alerts.data?.alerts ?? []), [alerts.data]);
   const availableResources = useMemo(
     () => resourcesQuery.data?.reduce((sum, item) => sum + (item.quantity ?? 0), 0) ?? 0,
     [resourcesQuery.data],
   );
   const peopleNeedingHelp = useMemo(
-    () => openRequests.reduce((sum, r) => sum + (r.peopleCount ?? 1), 0),
-    [openRequests],
+    () => filteredRequests.reduce((sum, r) => sum + (r.peopleCount ?? 1), 0),
+    [filteredRequests],
   );
   const estimatedResourceDemand = useMemo(
-    () => openRequests.reduce((sum, r) => sum + Math.max(1, r.peopleCount ?? 1), 0),
-    [openRequests],
+    () => filteredRequests.reduce((sum, r) => sum + Math.max(1, r.peopleCount ?? 1), 0),
+    [filteredRequests],
   );
   const warehouseInventory = useMemo(() => {
     const stock = new Map<number, number>();
@@ -76,21 +100,29 @@ export default function RescuePortal() {
     return ids.size;
   }, [resourcesQuery.data]);
   const defaultDispatchResource = useMemo(
-    () => resourcesQuery.data?.find((resource) => resource.quantity > 0) ?? null,
-    [resourcesQuery.data],
+    () =>
+      resourcesQuery.data?.find(
+        (resource) =>
+          resource.quantity > 0 && (selectedHubId == null || resource.warehouseId === selectedHubId),
+      ) ?? null,
+    [resourcesQuery.data, selectedHubId],
   );
-  const warehouses = warehousesQuery.data ?? [];
   const isDispatching = createDistributionLog.isPending;
   const isRestocking = updateResourceMutation.isPending;
 
   const [notifications, setNotifications] = useState<NotificationEntry[]>([]);
   const seenAlertIdsRef = useRef<Set<number>>(new Set());
 
-  const handleUpdateRequest = (requestId: number, status: RescueRequest["status"]) => {
+  const handleUpdateRequest = (
+    requestId: number,
+    status: RescueRequest["status"],
+  ) => {
     updateRescueRequest.mutate(
       { id: requestId, data: { status } },
       {
-        onSuccess: () => toast.success(`Request #${requestId} marked as ${status}`),
+        onSuccess: () => {
+          toast.success(`Request #${requestId} marked as ${status}`);
+        },
         onError: (error: any) => toast.error(error?.message ?? "Unable to update request status"),
       },
     );
@@ -174,7 +206,36 @@ export default function RescuePortal() {
       </div>
 
       <div className="py-10 sm:py-14 container mx-auto space-y-6">
-        <h2 className="text-2xl sm:text-3xl font-extrabold">Disaster Response Dashboard</h2>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h2 className="text-2xl sm:text-3xl font-extrabold">Disaster Response Dashboard</h2>
+            <p className="text-sm text-muted-foreground">
+              Filter incidents by operational hub to keep teams focused on their city and its neighbouring corridors.
+            </p>
+          </div>
+          <div className="w-full sm:max-w-sm space-y-2">
+            <Label className="text-xs uppercase tracking-wide">Operational hub</Label>
+            <select
+              className="w-full rounded-md border bg-background p-2 text-sm"
+              value={selectedHubId ?? ""}
+              onChange={(event) => {
+                const { value } = event.target;
+                setSelectedHubId(value ? Number(value) : null);
+              }}
+              disabled={!warehouses.length}
+            >
+              {!warehouses.length && <option value="">No warehouses available</option>}
+              {warehouses.map((warehouse) => (
+                <option key={warehouse.id} value={warehouse.id}>
+                  {warehouse.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Showing requests within ~{NEIGHBOR_RADIUS_KM} km of {selectedWarehouse?.name ?? "the selected hub"}.
+            </p>
+          </div>
+        </div>
 
         {highlightedAlert && (
           <CriticalAlertBanner alert={highlightedAlert} isLoading={alerts.isLoading} />
@@ -265,50 +326,60 @@ export default function RescuePortal() {
 
             <section className="rounded-xl border bg-card p-6">
               <div className="flex items-center justify-between mb-2">
-                <h2 className="text-xl font-bold">Current Rescue</h2>
-                <div className="text-sm text-muted-foreground">{activeRequest ? "Active" : "Idle"}</div>
+                <h2 className="text-xl font-bold">Current Rescues</h2>
+                <div className="text-sm text-muted-foreground">
+                  {activeRequests.length ? `${activeRequests.length} active` : "Idle"}
+                </div>
               </div>
-              {activeRequest ? (
-                <div className="rounded-lg border p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="font-semibold">#{activeRequest.id} • Priority {activeRequest.priority} • {activeRequest.status}</div>
-                    <div className="text-sm text-muted-foreground">{activeRequest.location}</div>
-                  </div>
-                  <div className="mt-2 text-sm">{activeRequest.details}</div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Button
-                      onClick={() => handleUpdateRequest(activeRequest.id, "fulfilled")}
-                      disabled={updateRescueRequest.isPending}
-                    >
-                      Mark Fulfilled
-                    </Button>
-                    <Button
-                      variant="outline"
-                      disabled={!defaultDispatchResource || isDispatching || (defaultDispatchResource?.quantity ?? 0) === 0}
-                      onClick={() => {
-                        if (!defaultDispatchResource) return;
-                        const qty = Math.min(10, defaultDispatchResource.quantity);
-                        handleDispatchResource(defaultDispatchResource, qty, activeRequest);
-                      }}
-                    >
-                      {defaultDispatchResource
-                        ? `Dispatch ${Math.min(10, defaultDispatchResource.quantity)} ${defaultDispatchResource.type}`
-                        : "Dispatch Resources"}
-                    </Button>
-                  </div>
+              {activeRequests.length ? (
+                <div className="space-y-3">
+                  {activeRequests.map((request) => (
+                    <div key={request.id} className="rounded-lg border p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="font-semibold">
+                          #{request.id} • Priority {request.priority} • {request.status}
+                        </div>
+                        <div className="text-sm text-muted-foreground">{request.location}</div>
+                      </div>
+                      <div className="mt-2 text-sm">{request.details}</div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button
+                          onClick={() => handleUpdateRequest(request.id, "fulfilled")}
+                          disabled={updateRescueRequest.isPending}
+                        >
+                          Mark Fulfilled
+                        </Button>
+                        <Button
+                          variant="outline"
+                          disabled={!defaultDispatchResource || isDispatching || (defaultDispatchResource?.quantity ?? 0) === 0}
+                          onClick={() => {
+                            if (!defaultDispatchResource) return;
+                            const qty = Math.min(10, defaultDispatchResource.quantity);
+                            handleDispatchResource(defaultDispatchResource, qty, request);
+                          }}
+                        >
+                          {defaultDispatchResource
+                            ? `Dispatch ${Math.min(10, defaultDispatchResource.quantity)} ${defaultDispatchResource.type}`
+                            : "Dispatch Resources"}
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ) : (
-                <div className="text-sm text-muted-foreground">No active rescues.</div>
+                <div className="text-sm text-muted-foreground">
+                  No active rescues within this operational window.
+                </div>
               )}
             </section>
 
             <section className="rounded-xl border bg-card p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-bold">Requests</h2>
-                <div className="text-sm text-muted-foreground">Open: {openRequests.length}</div>
+                <div className="text-sm text-muted-foreground">Open: {filteredRequests.length}</div>
               </div>
               <div className="space-y-3">
-                {openRequests.map((r) => (
+                {pendingRequests.map((r) => (
                   <div key={r.id} className="rounded-lg border p-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="font-semibold">#{r.id} • Priority {r.priority}</div>
@@ -345,8 +416,10 @@ export default function RescuePortal() {
                     </div>
                   </div>
                 ))}
-                {openRequests.length === 0 && (
-                  <div className="text-sm text-muted-foreground">No open requests.</div>
+                {pendingRequests.length === 0 && (
+                  <div className="text-sm text-muted-foreground">
+                    No pending requests within {selectedWarehouse?.name ?? "this hub"}'s coverage radius.
+                  </div>
                 )}
               </div>
             </section>
@@ -401,7 +474,7 @@ export default function RescuePortal() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => handleDispatchResource(resource, Math.min(10, resource.quantity), activeRequest)}
+                                  onClick={() => handleDispatchResource(resource, Math.min(10, resource.quantity), primaryActiveRequest ?? undefined)}
                                   disabled={resource.quantity === 0 || isDispatching}
                                 >
                                   Dispatch 10
@@ -425,12 +498,12 @@ export default function RescuePortal() {
             <section className="rounded-xl border bg-card p-6">
               <h2 className="text-xl font-bold mb-4">Real-Time Tracking Panel</h2>
               <ul className="space-y-3 text-sm">
-                {openRequests.slice(0, 3).map((req) => (
+                {filteredRequests.slice(0, 3).map((req) => (
                   <li key={req.id}>
                     Request #{req.id} • {req.priority} priority at {req.location} ({req.peopleCount ?? 1} people waiting)
                   </li>
                 ))}
-                {openRequests.length === 0 && (
+                {filteredRequests.length === 0 && (
                   <li className="text-muted-foreground">All requests fulfilled and no pending dispatches.</li>
                 )}
               </ul>
@@ -444,11 +517,11 @@ export default function RescuePortal() {
                 <Button
                   variant="outline"
                   onClick={() => {
-                    if (!defaultDispatchResource || !activeRequest) return;
+                    if (!defaultDispatchResource || !primaryActiveRequest) return;
                     const qty = Math.min(25, defaultDispatchResource.quantity);
-                    handleDispatchResource(defaultDispatchResource, qty, activeRequest);
+                    handleDispatchResource(defaultDispatchResource, qty, primaryActiveRequest);
                   }}
-                  disabled={!defaultDispatchResource || !activeRequest || isDispatching || (defaultDispatchResource?.quantity ?? 0) === 0}
+                  disabled={!defaultDispatchResource || !primaryActiveRequest || isDispatching || (defaultDispatchResource?.quantity ?? 0) === 0}
                 >
                   Dispatch to field
                 </Button>
@@ -469,7 +542,7 @@ export default function RescuePortal() {
               <h3 className="text-lg font-bold">Resource Overview</h3>
               <ul className="mt-3 space-y-1 text-sm">
                 <li>Current available resources: <strong>{availableResources}</strong></li>
-                <li>Open rescue cases: <strong>{openRequests.length}</strong></li>
+                <li>Open rescue cases: <strong>{filteredRequests.length}</strong></li>
                 <li>People needing help: <strong>{peopleNeedingHelp}</strong></li>
                 <li>Estimated kits required: <strong>{estimatedResourceDemand}</strong></li>
                 <li>Warehouses with stock: <strong>{warehousesWithInventory}</strong> / {warehouses.length}</li>
@@ -479,7 +552,7 @@ export default function RescuePortal() {
             <section className="rounded-xl border bg-card p-6">
               <h3 className="text-lg font-bold">Requests Sidebar</h3>
               <ul className="mt-3 space-y-2 text-sm max-h-72 overflow-auto">
-                {requests.map((r) => (
+                {filteredRequests.map((r) => (
                   <li key={r.id} className="flex items-center justify-between">
                     <span>#{r.id}</span>
                     <span className="text-muted-foreground">{r.status}</span>
@@ -624,6 +697,45 @@ const severityOrder: Record<string, number> = {
 export function getSeverityRank(severity?: string | null) {
   if (!severity) return 0;
   return severityOrder[severity.toLowerCase()] ?? 0;
+}
+
+function filterRequestsByHub(requests: RescueRequest[], warehouse: Warehouse | null) {
+  if (!warehouse) return requests;
+  return requests.filter((request) => isRequestWithinHub(request, warehouse));
+}
+
+function isRequestWithinHub(request: RescueRequest, warehouse: Warehouse) {
+  if (warehouse.latitude != null && warehouse.longitude != null && request.latitude != null && request.longitude != null) {
+    const distanceKm = calculateDistanceKm(request.latitude, request.longitude, warehouse.latitude, warehouse.longitude);
+    return distanceKm <= NEIGHBOR_RADIUS_KM;
+  }
+  const hubCity = extractCityKeyword(warehouse.location ?? "");
+  const requestCity = extractCityKeyword(request.location ?? "");
+  if (hubCity && requestCity) {
+    if (hubCity === requestCity) return true;
+    return requestCity.includes(hubCity) || hubCity.includes(requestCity);
+  }
+  return true;
+}
+
+function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 6371; // km
+  const dLat = toRadians(lat2 - lat1);
+  const dLon = toRadians(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function toRadians(value: number) {
+  return (value * Math.PI) / 180;
+}
+
+function extractCityKeyword(location: string) {
+  const primary = location.split(",")[0] ?? "";
+  return primary.trim().toLowerCase();
 }
 
 export function isHighSeverity(severity?: string | null) {

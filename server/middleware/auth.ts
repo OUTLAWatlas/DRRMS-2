@@ -46,7 +46,7 @@ export async function loadUser(req: AuthRequest, _res: Response, next: NextFunct
   // Optional middleware to load full user record if needed
   if (!req.user) return next();
   const db = getDb();
-  const user = await db.select().from(users).where(eq(users.id, req.user.userId)).get?.();
+  await db.select().from(users).where(eq(users.id, req.user.userId)).limit(1);
   // Not strictly used in this implementation; kept for possible future enrichment
   return next();
 }

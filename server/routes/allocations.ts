@@ -94,7 +94,7 @@ router.get("/", authMiddleware, rescuerOnly, async (_req, res) => {
 router.get("/history", authMiddleware, rescuerOnly, async (req, res) => {
   const filters = parseAllocationHistoryFilters(req.query as Record<string, unknown>);
   const db = getDb();
-  let query = db
+  const baseQuery = db
     .select({
       id: allocationHistory.id,
       allocationId: allocationHistory.allocationId,
@@ -117,21 +117,17 @@ router.get("/history", authMiddleware, rescuerOnly, async (req, res) => {
     .orderBy(desc(allocationHistory.createdAt));
 
   const whereClause = buildAllocationHistoryWhere(filters);
-  if (whereClause) {
-    query = query.where(whereClause);
-  }
-  if (filters.limit) {
-    query = query.limit(filters.limit);
-  }
+  const filteredQuery = whereClause ? baseQuery.where(whereClause) : baseQuery;
+  const limitedQuery = filters.limit ? filteredQuery.limit(filters.limit) : filteredQuery;
 
-  const history = await query;
+  const history = await limitedQuery;
   res.json(history);
 });
 
 router.get("/history/export", authMiddleware, rescuerOnly, async (req, res) => {
   const filters = parseAllocationHistoryFilters(req.query as Record<string, unknown>);
   const db = getDb();
-  let query = db
+  const baseQuery = db
     .select({
       createdAt: allocationHistory.createdAt,
       requestId: allocationHistory.requestId,
@@ -152,11 +148,9 @@ router.get("/history/export", authMiddleware, rescuerOnly, async (req, res) => {
     .orderBy(desc(allocationHistory.createdAt));
 
   const whereClause = buildAllocationHistoryWhere(filters);
-  if (whereClause) {
-    query = query.where(whereClause);
-  }
-
-  const rows = await query.limit(filters.limit ?? 2000);
+  const filteredQuery = whereClause ? baseQuery.where(whereClause) : baseQuery;
+  const exportLimit = filters.limit ?? 2000;
+  const rows = await filteredQuery.limit(exportLimit);
   const header = [
     "timestamp",
     "event_type",

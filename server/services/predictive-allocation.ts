@@ -344,7 +344,13 @@ function buildRecommendation(
   const demandPressure = stats ? (stats.avgPending + stats.avgRequestCount) / Math.max(1, inventoryBaseline) : 0.4;
   const severityFactor = request.criticalityScore / 100;
   const weatherFactor = stats?.weatherScore ?? 0;
-  const createdAtMs = request.createdAt instanceof Date ? request.createdAt.getTime() : request.createdAt;
+  const createdAtValue = request.createdAt;
+  const createdAtMs =
+    typeof createdAtValue === "number"
+      ? createdAtValue
+      : createdAtValue
+        ? new Date(createdAtValue).getTime()
+        : nowMs;
   const ageHours = Math.max(0, (nowMs - createdAtMs) / (1000 * 60 * 60));
   const urgencyBoost = signals.timeDecayWeight / 45 + Math.min(0.25, ageHours / 72);
   const proximityFactor =

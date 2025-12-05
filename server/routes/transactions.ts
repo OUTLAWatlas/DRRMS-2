@@ -11,7 +11,7 @@ const router = Router();
 router.get("/", authMiddleware, rescuerOnly, async (req, res) => {
   const filters = parseTransactionFilters(req.query as Record<string, unknown>);
   const db = getDb();
-  let query = db
+  const baseQuery = db
     .select({
       id: transactions.id,
       reference: transactions.reference,
@@ -32,14 +32,10 @@ router.get("/", authMiddleware, rescuerOnly, async (req, res) => {
     .orderBy(desc(transactions.recordedAt));
 
   const whereClause = buildTransactionWhere(filters);
-  if (whereClause) {
-    query = query.where(whereClause);
-  }
-  if (filters.limit) {
-    query = query.limit(filters.limit);
-  }
+  const filteredQuery = whereClause ? baseQuery.where(whereClause) : baseQuery;
+  const limitedQuery = filters.limit ? filteredQuery.limit(filters.limit) : filteredQuery;
 
-  const rows = await query;
+  const rows = await limitedQuery;
 
   res.json(
     rows.map((row) => ({
@@ -52,7 +48,7 @@ router.get("/", authMiddleware, rescuerOnly, async (req, res) => {
 router.get("/summary", authMiddleware, rescuerOnly, async (req, res) => {
   const summaryOptions = parseTransactionSummaryOptions(req.query as Record<string, unknown>);
   const db = getDb();
-  let query = db
+  const baseQuery = db
     .select({
       direction: transactions.direction,
       amountCents: transactions.amountCents,
@@ -62,11 +58,9 @@ router.get("/summary", authMiddleware, rescuerOnly, async (req, res) => {
     .from(transactions);
 
   const whereClause = buildTransactionWhere(summaryOptions);
-  if (whereClause) {
-    query = query.where(whereClause);
-  }
+  const filteredQuery = whereClause ? baseQuery.where(whereClause) : baseQuery;
 
-  const rows = await query;
+  const rows = await filteredQuery;
   let totalIncome = 0;
   let totalExpense = 0;
   const bucketMap = new Map<number, PeriodBucket>();
@@ -121,7 +115,7 @@ router.get("/summary", authMiddleware, rescuerOnly, async (req, res) => {
 router.get("/export", authMiddleware, rescuerOnly, async (req, res) => {
   const filters = parseTransactionFilters(req.query as Record<string, unknown>);
   const db = getDb();
-  let query = db
+  const baseQuery = db
     .select({
       id: transactions.id,
       reference: transactions.reference,
@@ -138,13 +132,9 @@ router.get("/export", authMiddleware, rescuerOnly, async (req, res) => {
     .orderBy(desc(transactions.recordedAt));
 
   const whereClause = buildTransactionWhere(filters);
-  if (whereClause) {
-    query = query.where(whereClause);
-  }
+  const filteredQuery = whereClause ? baseQuery.where(whereClause) : baseQuery;
   const exportLimit = filters.limit ?? 2000;
-  query = query.limit(exportLimit);
-
-  const rows = await query;
+  const rows = await filteredQuery.limit(exportLimit);
   const header = [
     "id",
     "reference",

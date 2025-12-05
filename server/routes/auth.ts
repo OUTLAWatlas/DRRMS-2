@@ -158,7 +158,7 @@ router.post("/forgot-password", forgotLimiter, async (req, res) => {
 router.post("/mfa/setup", authMiddleware, requirePermission("rescue:list:own"), async (req: AuthRequest, res) => {
   try {
     const db = getDb();
-    const user = await db.select().from(users).where(eq(users.id, req.user!.userId)).get?.();
+    const [user] = await db.select().from(users).where(eq(users.id, req.user!.userId));
     if (!user) return res.status(404).json({ error: "User not found" });
     const { secret, uri } = issueMfaSetup(user.email ?? `user-${user.id}`);
     const recoveryCodes = generateRecoveryCodes();
@@ -181,7 +181,7 @@ router.post("/mfa/verify", authMiddleware, requirePermission("rescue:list:own"),
   try {
     const body = mfaVerifySchema.parse(req.body);
     const db = getDb();
-    const record = await db.select().from(users).where(eq(users.id, req.user!.userId)).get?.();
+    const [record] = await db.select().from(users).where(eq(users.id, req.user!.userId));
     if (!record || !record.mfaSecret) return res.status(400).json({ error: "No MFA secret on file" });
     const secret = decryptMfaSecret(record.mfaSecret);
     if (!secret) return res.status(400).json({ error: "Secret unavailable" });
@@ -203,7 +203,7 @@ router.post("/mfa/disable", authMiddleware, requirePermission("rescue:list:own")
   try {
     const body = mfaDisableSchema.parse(req.body);
     const db = getDb();
-    const record = await db.select().from(users).where(eq(users.id, req.user!.userId)).get?.();
+    const [record] = await db.select().from(users).where(eq(users.id, req.user!.userId));
     if (!record?.mfaSecret) {
       return res.status(200).json({ message: "MFA already disabled" });
     }
@@ -235,7 +235,7 @@ router.get("/me", authMiddleware, async (req, res) => {
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
     const db = getDb();
-    const u = await db.select().from(users).where(eq(users.id, userId)).get?.();
+    const [u] = await db.select().from(users).where(eq(users.id, userId));
     if (!u) return res.status(404).json({ error: "Not found" });
     return res.json({ ...serializeUser(u), createdAt: u.createdAt, updatedAt: u.updatedAt });
   } catch (e) {
@@ -329,7 +329,7 @@ router.post("/users/:id/role", authMiddleware, adminOnly, async (req, res) => {
 
     const payload = updateUserRoleSchema.parse(req.body);
     const db = getDb();
-    const existing = await db.select().from(users).where(eq(users.id, userId)).get?.();
+    const [existing] = await db.select().from(users).where(eq(users.id, userId));
     if (!existing) {
       return res.status(404).json({ error: "User not found" });
     }
@@ -377,7 +377,7 @@ router.post("/users/:id/access", authMiddleware, adminOnly, async (req: AuthRequ
 
     const payload = updateUserAccessSchema.parse(req.body);
     const db = getDb();
-    const existing = await db.select().from(users).where(eq(users.id, userId)).get?.();
+    const [existing] = await db.select().from(users).where(eq(users.id, userId));
     if (!existing) {
       return res.status(404).json({ error: "User not found" });
     }
@@ -411,7 +411,13 @@ router.post("/users/:id/access", authMiddleware, adminOnly, async (req: AuthRequ
 
 export default router;
 
-function serializeUser(user: typeof users.$inferSelect) {
+type SerializableUser = Pick<
+  typeof users.$inferSelect,
+  "id" | "name" | "email" | "role" | "isApproved" | "isBlocked"
+> &
+  Partial<Pick<typeof users.$inferSelect, "mfaEnabled">>;
+
+function serializeUser(user: SerializableUser) {
   return {
     id: user.id,
     name: user.name,

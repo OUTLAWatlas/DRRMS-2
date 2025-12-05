@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import { alias } from "drizzle-orm/sqlite-core";
+import { alias } from "drizzle-orm/pg-core";
 import { getDb } from "../db";
 import {
   allocationHistory,
