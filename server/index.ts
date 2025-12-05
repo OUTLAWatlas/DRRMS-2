@@ -17,6 +17,7 @@ import geoRoutes from "./routes/geospatial";
 import predictiveRoutes from "./routes/predictive";
 import healthRoutes from "./routes/health";
 import transparencyRoutes from "./routes/transparency";
+import userRoutes from "./routes/users";
 import { startLiveFeedScheduler } from "./services/live-feed-scheduler";
 import { startPredictiveAllocationScheduler } from "./services/predictive-allocation";
 import { startDemandSnapshotScheduler } from "./services/demand-snapshot-scheduler";
@@ -65,6 +66,7 @@ export function createServer() {
   app.use("/api/predictive", predictiveRoutes);
   app.use("/api/health", healthRoutes);
   app.use("/api/transparency", transparencyRoutes);
+  app.use("/api/users", userRoutes);
 
   startLiveFeedScheduler();
   startPredictiveAllocationScheduler();

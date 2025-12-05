@@ -42,6 +42,18 @@ export const updateUserAccessSchema = z.object({
   blocked: z.boolean(),
 });
 
+export const updateUserProfileSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    email: z.string().email().optional(),
+    role: z.enum(["survivor", "rescuer", "admin"]).optional(),
+    isApproved: z.boolean().optional(),
+    isBlocked: z.boolean().optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, {
+    message: "At least one field must be provided",
+  });
+
 export const mfaVerifySchema = z.object({
   token: z.string().length(6),
 });
@@ -185,6 +197,7 @@ export type LoginInput = z.infer<typeof loginSchema>;
 export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 export type UpdateUserRoleInput = z.infer<typeof updateUserRoleSchema>;
 export type UpdateUserAccessInput = z.infer<typeof updateUserAccessSchema>;
+export type UpdateUserProfileInput = z.infer<typeof updateUserProfileSchema>;
 export type MfaVerifyInput = z.infer<typeof mfaVerifySchema>;
 export type MfaDisableInput = z.infer<typeof mfaDisableSchema>;
 export type CreateTransactionInput = z.infer<typeof createTransactionSchema>;

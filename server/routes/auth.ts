@@ -128,6 +128,11 @@ router.post("/login", loginLimiter, async (req, res) => {
   }
 });
 
+router.post("/logout", authMiddleware, (req, res) => {
+  // Stateless JWT auth: client simply discards token. Endpoint exists for parity with roadmap requirements.
+  return res.json({ message: "Logged out" });
+});
+
 router.post("/forgot-password", forgotLimiter, async (req, res) => {
   try {
     const { email } = forgotPasswordSchema.parse(req.body);
