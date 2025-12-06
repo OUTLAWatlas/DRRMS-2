@@ -10,8 +10,8 @@ import { requirePermission } from "../security/permissions";
 
 const router = Router();
 
-// GET /api/resources - List all resources (Rescuers only)
-router.get("/", authMiddleware, rescuerOnly, requirePermission("resources:read"), async (req, res) => {
+// GET /api/resources - List all resources (viewable by survivors/rescuers/admin)
+router.get("/", authMiddleware, requirePermission("resources:read"), async (req, res) => {
   const db = getDb();
   const filters = parseResourceFilters(req.query as Record<string, unknown>);
   const whereClause = buildResourceWhere(filters);
@@ -40,7 +40,7 @@ router.get("/", authMiddleware, rescuerOnly, requirePermission("resources:read")
   res.json(rows);
 });
 
-router.get("/low-stock", authMiddleware, rescuerOnly, requirePermission("resources:read"), async (req, res) => {
+router.get("/low-stock", authMiddleware, requirePermission("resources:read"), async (req, res) => {
   const db = getDb();
   const warehouseId = parsePositiveInt(req.query["warehouseId"], 1, Number.MAX_SAFE_INTEGER);
   const limit = parsePositiveInt(req.query["limit"], 1, 500) ?? 50;
@@ -73,8 +73,8 @@ router.get("/low-stock", authMiddleware, rescuerOnly, requirePermission("resourc
   });
 });
 
-// GET /api/resources/:id - Get single resource (Rescuers only)
-router.get("/:id", authMiddleware, rescuerOnly, requirePermission("resources:read"), async (req, res) => {
+// GET /api/resources/:id - Get single resource (viewable by survivors/rescuers/admin)
+router.get("/:id", authMiddleware, requirePermission("resources:read"), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {

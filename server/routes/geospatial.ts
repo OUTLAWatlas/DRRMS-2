@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { authMiddleware, rescuerOnly } from "../middleware/auth";
+import { authMiddleware } from "../middleware/auth";
+import { requirePermission } from "../security/permissions";
 import { getDb } from "../db";
 import {
   rescueRequests,
@@ -12,7 +13,7 @@ import { and, eq, gte, sql } from "drizzle-orm";
 
 const router = Router();
 
-router.get("/overview", authMiddleware, rescuerOnly, async (_req, res) => {
+router.get("/overview", authMiddleware, requirePermission("livefeeds:read"), async (_req, res) => {
   const db = getDb();
   const requestsWithCoords = await db
     .select({
@@ -90,7 +91,7 @@ router.get("/overview", authMiddleware, rescuerOnly, async (_req, res) => {
   });
 });
 
-router.get("/heatmap", authMiddleware, rescuerOnly, async (req, res) => {
+router.get("/heatmap", authMiddleware, requirePermission("livefeeds:read"), async (req, res) => {
   const bucketSize = req.query.bucket ? Math.max(0.05, parseFloat(String(req.query.bucket))) : 0.25;
   const windowHours = req.query.window ? Math.max(1, parseInt(String(req.query.window), 10)) : 24;
   const sinceMs = Date.now() - windowHours * 60 * 60 * 1000;

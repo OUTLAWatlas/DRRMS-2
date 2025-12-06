@@ -3,13 +3,14 @@ import { desc, eq, and, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import { resources, resourceTransfers } from "../db/schema";
 import { authMiddleware, rescuerOnly, type AuthRequest } from "../middleware/auth";
+import { requirePermission } from "../security/permissions";
 import { createResourceTransferSchema } from "../../shared/api";
 import { z } from "zod";
 import { badRequest, HttpError } from "../utils/httpError";
 
 const router = Router();
 
-router.get("/", authMiddleware, rescuerOnly, async (_req, res) => {
+router.get("/", authMiddleware, requirePermission("resources:read"), async (_req, res) => {
   const db = getDb();
   const transfers = await db
     .select()
@@ -19,7 +20,7 @@ router.get("/", authMiddleware, rescuerOnly, async (_req, res) => {
   res.json(transfers);
 });
 
-router.post("/", authMiddleware, rescuerOnly, async (req: AuthRequest, res) => {
+router.post("/", authMiddleware, rescuerOnly, requirePermission("resources:write"), async (req: AuthRequest, res) => {
   try {
     const payload = createResourceTransferSchema.parse(req.body);
     const db = getDb();

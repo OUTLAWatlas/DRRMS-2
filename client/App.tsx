@@ -52,7 +52,7 @@ const App = () => (
               <Route
                 path="/resources"
                 element={
-                  <RequireAuth allowedRoles={["admin"]}>
+                  <RequireAuth allowedRoles={["admin", "rescuer", "survivor"]}>
                     <ResourcesPage />
                   </RequireAuth>
                 }

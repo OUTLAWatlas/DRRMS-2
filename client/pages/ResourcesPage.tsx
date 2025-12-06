@@ -10,6 +10,7 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } f
 import { toast } from "sonner";
 import { OperationsMap } from "@/components/geo/OperationsMap";
 import { useZodForm } from "@/hooks/use-zod-form";
+import { useAppStore } from "@/state/app-store";
 import {
   useCreateWarehouseMutation,
   useCreateResourceMutation,
@@ -50,6 +51,10 @@ export default function ResourcesPage() {
   const [resourceSortBy, setResourceSortBy] = useState<"updatedAt" | "quantity" | "type">("updatedAt");
   const [resourceSortDirection, setResourceSortDirection] = useState<"asc" | "desc">("desc");
   const [resourceLimit, setResourceLimit] = useState<number>(DEFAULT_RESOURCE_PAGE_SIZE);
+
+  const role = useAppStore((s) => s.user?.role);
+  const canEdit = role === "admin" || role === "rescuer";
+  const isReadOnly = !canEdit;
 
   const resourcesQueryParams = useMemo(
     () => ({
@@ -173,6 +178,13 @@ export default function ResourcesPage() {
   const isCreatingTransfer = createTransfer.isPending || resourceTransferForm.formState.isSubmitting;
   const isCreatingDistribution = createDistribution.isPending || distributionForm.formState.isSubmitting;
 
+  const disableCreateWarehouse = isReadOnly || isCreatingWarehouse;
+  const disableUpdateWarehouse = isReadOnly || isUpdatingWarehouse;
+  const disableCreateResource = isReadOnly || isCreatingResource;
+  const disableUpdateResource = isReadOnly || isUpdatingResource;
+  const disableCreateTransfer = isReadOnly || isCreatingTransfer;
+  const disableCreateDistribution = isReadOnly || isCreatingDistribution;
+
   useEffect(() => {
     setResourcePage(1);
   }, [resourceSearch, resourceWarehouseFilter, resourceTypeFilter, resourceSortBy, resourceSortDirection, resourceLimit]);
@@ -192,7 +204,16 @@ export default function ResourcesPage() {
     }
   }, [selectedDistributionResourceId, resourceList, distributionForm]);
 
+  const guardReadOnly = () => {
+    if (isReadOnly) {
+      toast.error("You have view-only access to the Resource Console.");
+      return true;
+    }
+    return false;
+  };
+
   const submitCreateWarehouse = createWarehouseForm.handleSubmit((values) => {
+    if (guardReadOnly()) return;
     createWarehouse.mutate(values, {
       onSuccess: () => {
         toast.success("Warehouse created");
@@ -207,6 +228,7 @@ export default function ResourcesPage() {
   });
 
   const submitUpdateWarehouse = updateWarehouseForm.handleSubmit(({ warehouseId, ...data }) => {
+    if (guardReadOnly()) return;
     const payload: UpdateWarehouseInput = { ...data };
     updateWarehouse.mutate(
       { id: warehouseId, data: payload },
@@ -225,6 +247,7 @@ export default function ResourcesPage() {
   });
 
   const submitCreateResource = createResourceForm.handleSubmit((values) => {
+    if (guardReadOnly()) return;
     createResource.mutate(values, {
       onSuccess: () => {
         toast.success("Resource saved");
@@ -245,6 +268,7 @@ export default function ResourcesPage() {
   });
 
   const submitUpdateResource = updateResourceForm.handleSubmit(({ resourceId, ...data }) => {
+    if (guardReadOnly()) return;
     const payload: UpdateResourceInput = { ...data };
     updateResource.mutate(
       { id: resourceId, data: payload },
@@ -263,6 +287,7 @@ export default function ResourcesPage() {
   });
 
   const submitCreateTransfer = resourceTransferForm.handleSubmit((values) => {
+    if (guardReadOnly()) return;
     createTransfer.mutate(values, {
       onSuccess: () => {
         toast.success("Transfer recorded");
@@ -277,6 +302,7 @@ export default function ResourcesPage() {
   });
 
   const submitCreateDistribution = distributionForm.handleSubmit((values) => {
+    if (guardReadOnly()) return;
     createDistribution.mutate(values, {
       onSuccess: () => {
         toast.success("Distribution logged");
@@ -571,107 +597,28 @@ export default function ResourcesPage() {
           </CardHeader>
           <CardContent className="space-y-6">
             <form className="space-y-3" onSubmit={submitCreateWarehouse}>
-              <div className="flex items-center justify-between">
-                <h3 className="font-semibold">Create warehouse</h3>
-                <Button size="sm" type="submit" disabled={isCreatingWarehouse}>
-                  {isCreatingWarehouse ? "Saving..." : "Save"}
-                </Button>
-              </div>
-              <div>
-                <Label>Name</Label>
-                <Input disabled={isCreatingWarehouse} {...createWarehouseForm.register("name")} />
-                {createWarehouseForm.formState.errors.name && (
-                  <p className="mt-1 text-xs text-destructive">
-                    {createWarehouseForm.formState.errors.name.message}
-                  </p>
-                )}
-              </div>
-              <div>
-                <Label>Location</Label>
-                <Input disabled={isCreatingWarehouse} {...createWarehouseForm.register("location")} />
-                {createWarehouseForm.formState.errors.location && (
-                  <p className="mt-1 text-xs text-destructive">
-                    {createWarehouseForm.formState.errors.location.message}
-                  </p>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label>Capacity</Label>
-                  <Input
-                    type="number"
-                    inputMode="numeric"
-                    disabled={isCreatingWarehouse}
-                    {...createWarehouseForm.register("capacity")}
-                  />
-                  {createWarehouseForm.formState.errors.capacity && (
-                    <p className="mt-1 text-xs text-destructive">
-                      {createWarehouseForm.formState.errors.capacity.message}
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <Label>Last audited at</Label>
-                  <Input
-                    type="datetime-local"
-                    disabled={isCreatingWarehouse}
-                    {...createWarehouseForm.register("lastAuditedAt")}
-                  />
-                  {createWarehouseForm.formState.errors.lastAuditedAt && (
-                    <p className="mt-1 text-xs text-destructive">
-                      {createWarehouseForm.formState.errors.lastAuditedAt.message}
-                    </p>
-                  )}
-                </div>
-              </div>
-              {createWarehouseForm.formState.errors.root?.message && (
-                <p className="text-xs text-destructive">{createWarehouseForm.formState.errors.root.message}</p>
-              )}
-            </form>
-
-            <div className="border-t pt-4">
-              <form className="space-y-3" onSubmit={submitUpdateWarehouse}>
+              <fieldset disabled={disableCreateWarehouse} className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <h3 className="font-semibold">Update warehouse</h3>
-                  <Button size="sm" type="submit" variant="outline" disabled={isUpdatingWarehouse}>
-                    {isUpdatingWarehouse ? "Updating..." : "Update"}
+                  <h3 className="font-semibold">Create warehouse</h3>
+                  <Button size="sm" type="submit" disabled={disableCreateWarehouse}>
+                    {isCreatingWarehouse ? "Saving..." : "Save"}
                   </Button>
                 </div>
                 <div>
-                  <Label>Warehouse</Label>
-                  <select
-                    className="mt-1 h-10 w-full rounded-md border px-3"
-                    disabled={isUpdatingWarehouse}
-                    {...updateWarehouseForm.register("warehouseId")}
-                  >
-                    <option value="">Select warehouse</option>
-                    {(warehouses.data ?? []).map((warehouse) => (
-                      <option key={warehouse.id} value={warehouse.id}>
-                        {warehouse.name}
-                      </option>
-                    ))}
-                  </select>
-                  {updateWarehouseForm.formState.errors.warehouseId && (
-                    <p className="mt-1 text-xs text-destructive">
-                      {updateWarehouseForm.formState.errors.warehouseId.message}
-                    </p>
-                  )}
-                </div>
-                <div>
                   <Label>Name</Label>
-                  <Input disabled={isUpdatingWarehouse} {...updateWarehouseForm.register("name")} />
-                  {updateWarehouseForm.formState.errors.name && (
+                  <Input disabled={disableCreateWarehouse} {...createWarehouseForm.register("name")} />
+                  {createWarehouseForm.formState.errors.name && (
                     <p className="mt-1 text-xs text-destructive">
-                      {updateWarehouseForm.formState.errors.name.message}
+                      {createWarehouseForm.formState.errors.name.message}
                     </p>
                   )}
                 </div>
                 <div>
                   <Label>Location</Label>
-                  <Input disabled={isUpdatingWarehouse} {...updateWarehouseForm.register("location")} />
-                  {updateWarehouseForm.formState.errors.location && (
+                  <Input disabled={disableCreateWarehouse} {...createWarehouseForm.register("location")} />
+                  {createWarehouseForm.formState.errors.location && (
                     <p className="mt-1 text-xs text-destructive">
-                      {updateWarehouseForm.formState.errors.location.message}
+                      {createWarehouseForm.formState.errors.location.message}
                     </p>
                   )}
                 </div>
@@ -681,12 +628,12 @@ export default function ResourcesPage() {
                     <Input
                       type="number"
                       inputMode="numeric"
-                      disabled={isUpdatingWarehouse}
-                      {...updateWarehouseForm.register("capacity")}
+                      disabled={disableCreateWarehouse}
+                      {...createWarehouseForm.register("capacity")}
                     />
-                    {updateWarehouseForm.formState.errors.capacity && (
+                    {createWarehouseForm.formState.errors.capacity && (
                       <p className="mt-1 text-xs text-destructive">
-                        {updateWarehouseForm.formState.errors.capacity.message}
+                        {createWarehouseForm.formState.errors.capacity.message}
                       </p>
                     )}
                   </div>
@@ -694,19 +641,102 @@ export default function ResourcesPage() {
                     <Label>Last audited at</Label>
                     <Input
                       type="datetime-local"
-                      disabled={isUpdatingWarehouse}
-                      {...updateWarehouseForm.register("lastAuditedAt")}
+                      disabled={disableCreateWarehouse}
+                      {...createWarehouseForm.register("lastAuditedAt")}
                     />
-                    {updateWarehouseForm.formState.errors.lastAuditedAt && (
+                    {createWarehouseForm.formState.errors.lastAuditedAt && (
                       <p className="mt-1 text-xs text-destructive">
-                        {updateWarehouseForm.formState.errors.lastAuditedAt.message}
+                        {createWarehouseForm.formState.errors.lastAuditedAt.message}
                       </p>
                     )}
                   </div>
                 </div>
-                {updateWarehouseForm.formState.errors.root?.message && (
-                  <p className="text-xs text-destructive">{updateWarehouseForm.formState.errors.root.message}</p>
+                {createWarehouseForm.formState.errors.root?.message && (
+                  <p className="text-xs text-destructive">{createWarehouseForm.formState.errors.root.message}</p>
                 )}
+              </fieldset>
+            </form>
+
+            <div className="border-t pt-4">
+              <form className="space-y-3" onSubmit={submitUpdateWarehouse}>
+                <fieldset disabled={disableUpdateWarehouse} className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold">Update warehouse</h3>
+                    <Button size="sm" type="submit" variant="outline" disabled={disableUpdateWarehouse}>
+                      {isUpdatingWarehouse ? "Updating..." : "Update"}
+                    </Button>
+                  </div>
+                  <div>
+                    <Label>Warehouse</Label>
+                    <select
+                      className="mt-1 h-10 w-full rounded-md border px-3"
+                      disabled={disableUpdateWarehouse}
+                      {...updateWarehouseForm.register("warehouseId")}
+                    >
+                      <option value="">Select warehouse</option>
+                      {(warehouses.data ?? []).map((warehouse) => (
+                        <option key={warehouse.id} value={warehouse.id}>
+                          {warehouse.name}
+                        </option>
+                      ))}
+                    </select>
+                    {updateWarehouseForm.formState.errors.warehouseId && (
+                      <p className="mt-1 text-xs text-destructive">
+                        {updateWarehouseForm.formState.errors.warehouseId.message}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <Label>Name</Label>
+                    <Input disabled={disableUpdateWarehouse} {...updateWarehouseForm.register("name")} />
+                    {updateWarehouseForm.formState.errors.name && (
+                      <p className="mt-1 text-xs text-destructive">
+                        {updateWarehouseForm.formState.errors.name.message}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <Label>Location</Label>
+                    <Input disabled={disableUpdateWarehouse} {...updateWarehouseForm.register("location")} />
+                    {updateWarehouseForm.formState.errors.location && (
+                      <p className="mt-1 text-xs text-destructive">
+                        {updateWarehouseForm.formState.errors.location.message}
+                      </p>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label>Capacity</Label>
+                      <Input
+                        type="number"
+                        inputMode="numeric"
+                        disabled={disableUpdateWarehouse}
+                        {...updateWarehouseForm.register("capacity")}
+                      />
+                      {updateWarehouseForm.formState.errors.capacity && (
+                        <p className="mt-1 text-xs text-destructive">
+                          {updateWarehouseForm.formState.errors.capacity.message}
+                        </p>
+                      )}
+                    </div>
+                    <div>
+                      <Label>Last audited at</Label>
+                      <Input
+                        type="datetime-local"
+                        disabled={disableUpdateWarehouse}
+                        {...updateWarehouseForm.register("lastAuditedAt")}
+                      />
+                      {updateWarehouseForm.formState.errors.lastAuditedAt && (
+                        <p className="mt-1 text-xs text-destructive">
+                          {updateWarehouseForm.formState.errors.lastAuditedAt.message}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  {updateWarehouseForm.formState.errors.root?.message && (
+                    <p className="text-xs text-destructive">{updateWarehouseForm.formState.errors.root.message}</p>
+                  )}
+                </fieldset>
               </form>
             </div>
           </CardContent>
@@ -881,171 +911,175 @@ export default function ResourcesPage() {
           </CardHeader>
           <CardContent className="space-y-6">
             <form className="space-y-3" onSubmit={submitCreateResource}>
-              <div className="flex items-center justify-between">
-                <h3 className="font-semibold">Add resource</h3>
-                <Button size="sm" type="submit" disabled={isCreatingResource}>
-                  {isCreatingResource ? "Saving..." : "Save"}
-                </Button>
-              </div>
-              <div>
-                <Label>Type</Label>
-                <Input disabled={isCreatingResource} {...createResourceForm.register("type")} />
-                {createResourceForm.formState.errors.type && (
-                  <p className="mt-1 text-xs text-destructive">
-                    {createResourceForm.formState.errors.type.message}
-                  </p>
-                )}
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <Label>Quantity</Label>
-                  <Input
-                    type="number"
-                    inputMode="numeric"
-                    disabled={isCreatingResource}
-                    {...createResourceForm.register("quantity")}
-                  />
-                  {createResourceForm.formState.errors.quantity && (
-                    <p className="mt-1 text-xs text-destructive">
-                      {createResourceForm.formState.errors.quantity.message}
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <Label>Unit</Label>
-                  <Input disabled={isCreatingResource} {...createResourceForm.register("unit")} />
-                </div>
-                <div>
-                  <Label>Reorder level</Label>
-                  <Input
-                    type="number"
-                    inputMode="numeric"
-                    disabled={isCreatingResource}
-                    {...createResourceForm.register("reorderLevel")}
-                  />
-                  {createResourceForm.formState.errors.reorderLevel && (
-                    <p className="mt-1 text-xs text-destructive">
-                      {createResourceForm.formState.errors.reorderLevel.message}
-                    </p>
-                  )}
-                </div>
-              </div>
-              <div>
-                <Label>Warehouse</Label>
-                <select
-                  className="mt-1 h-10 w-full rounded-md border px-3"
-                  disabled={isCreatingResource}
-                  {...createResourceForm.register("warehouseId")}
-                >
-                  <option value="">Select warehouse</option>
-                  {(warehouses.data ?? []).map((warehouse) => (
-                    <option key={warehouse.id} value={warehouse.id}>
-                      {warehouse.name}
-                    </option>
-                  ))}
-                </select>
-                {createResourceForm.formState.errors.warehouseId && (
-                  <p className="mt-1 text-xs text-destructive">
-                    {createResourceForm.formState.errors.warehouseId.message}
-                  </p>
-                )}
-              </div>
-              {createResourceForm.formState.errors.root?.message && (
-                <p className="text-xs text-destructive">{createResourceForm.formState.errors.root.message}</p>
-              )}
-            </form>
-
-            <div className="border-t pt-4">
-              <form className="space-y-3" onSubmit={submitUpdateResource}>
+              <fieldset disabled={disableCreateResource} className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <h3 className="font-semibold">Update resource</h3>
-                  <Button size="sm" type="submit" variant="outline" disabled={isUpdatingResource}>
-                    {isUpdatingResource ? "Updating..." : "Update"}
+                  <h3 className="font-semibold">Add resource</h3>
+                  <Button size="sm" type="submit" disabled={disableCreateResource}>
+                    {isCreatingResource ? "Saving..." : "Save"}
                   </Button>
                 </div>
                 <div>
-                  <Label>Resource</Label>
-                  <select
-                    className="mt-1 h-10 w-full rounded-md border px-3"
-                    disabled={isUpdatingResource}
-                    {...updateResourceForm.register("resourceId")}
-                  >
-                    <option value="">Select resource</option>
-                    {resourceList.map((resource) => (
-                      <option key={resource.id} value={resource.id}>
-                        {resource.type} • {warehouseNameMap[resource.warehouseId] ?? `Warehouse ${resource.warehouseId}`}
-                      </option>
-                    ))}
-                  </select>
-                  {updateResourceForm.formState.errors.resourceId && (
+                  <Label>Type</Label>
+                  <Input disabled={disableCreateResource} {...createResourceForm.register("type")} />
+                  {createResourceForm.formState.errors.type && (
                     <p className="mt-1 text-xs text-destructive">
-                      {updateResourceForm.formState.errors.resourceId.message}
+                      {createResourceForm.formState.errors.type.message}
                     </p>
                   )}
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>Type</Label>
-                    <Input disabled={isUpdatingResource} {...updateResourceForm.register("type")} />
-                  </div>
+                <div className="grid grid-cols-3 gap-3">
                   <div>
                     <Label>Quantity</Label>
                     <Input
                       type="number"
                       inputMode="numeric"
-                      disabled={isUpdatingResource}
-                      {...updateResourceForm.register("quantity")}
+                      disabled={disableCreateResource}
+                      {...createResourceForm.register("quantity")}
                     />
-                    {updateResourceForm.formState.errors.quantity && (
+                    {createResourceForm.formState.errors.quantity && (
                       <p className="mt-1 text-xs text-destructive">
-                        {updateResourceForm.formState.errors.quantity.message}
-                      </p>
-                    )}
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>Warehouse</Label>
-                    <select
-                      className="mt-1 h-10 w-full rounded-md border px-3"
-                      disabled={isUpdatingResource}
-                      {...updateResourceForm.register("warehouseId")}
-                    >
-                      <option value="">Keep current</option>
-                      {(warehouses.data ?? []).map((warehouse) => (
-                        <option key={warehouse.id} value={warehouse.id}>
-                          {warehouse.name}
-                        </option>
-                      ))}
-                    </select>
-                    {updateResourceForm.formState.errors.warehouseId && (
-                      <p className="mt-1 text-xs text-destructive">
-                        {updateResourceForm.formState.errors.warehouseId.message}
+                        {createResourceForm.formState.errors.quantity.message}
                       </p>
                     )}
                   </div>
                   <div>
                     <Label>Unit</Label>
-                    <Input disabled={isUpdatingResource} {...updateResourceForm.register("unit")} />
+                    <Input disabled={disableCreateResource} {...createResourceForm.register("unit")} />
+                  </div>
+                  <div>
+                    <Label>Reorder level</Label>
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      disabled={disableCreateResource}
+                      {...createResourceForm.register("reorderLevel")}
+                    />
+                    {createResourceForm.formState.errors.reorderLevel && (
+                      <p className="mt-1 text-xs text-destructive">
+                        {createResourceForm.formState.errors.reorderLevel.message}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div>
-                  <Label>Reorder level</Label>
-                  <Input
-                    type="number"
-                    inputMode="numeric"
-                    disabled={isUpdatingResource}
-                    {...updateResourceForm.register("reorderLevel")}
-                  />
-                  {updateResourceForm.formState.errors.reorderLevel && (
+                  <Label>Warehouse</Label>
+                  <select
+                    className="mt-1 h-10 w-full rounded-md border px-3"
+                    disabled={disableCreateResource}
+                    {...createResourceForm.register("warehouseId")}
+                  >
+                    <option value="">Select warehouse</option>
+                    {(warehouses.data ?? []).map((warehouse) => (
+                      <option key={warehouse.id} value={warehouse.id}>
+                        {warehouse.name}
+                      </option>
+                    ))}
+                  </select>
+                  {createResourceForm.formState.errors.warehouseId && (
                     <p className="mt-1 text-xs text-destructive">
-                      {updateResourceForm.formState.errors.reorderLevel.message}
+                      {createResourceForm.formState.errors.warehouseId.message}
                     </p>
                   )}
                 </div>
-                {updateResourceForm.formState.errors.root?.message && (
-                  <p className="text-xs text-destructive">{updateResourceForm.formState.errors.root.message}</p>
+                {createResourceForm.formState.errors.root?.message && (
+                  <p className="text-xs text-destructive">{createResourceForm.formState.errors.root.message}</p>
                 )}
+              </fieldset>
+            </form>
+
+            <div className="border-t pt-4">
+              <form className="space-y-3" onSubmit={submitUpdateResource}>
+                <fieldset disabled={disableUpdateResource} className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold">Update resource</h3>
+                    <Button size="sm" type="submit" variant="outline" disabled={disableUpdateResource}>
+                      {isUpdatingResource ? "Updating..." : "Update"}
+                    </Button>
+                  </div>
+                  <div>
+                    <Label>Resource</Label>
+                    <select
+                      className="mt-1 h-10 w-full rounded-md border px-3"
+                      disabled={disableUpdateResource}
+                      {...updateResourceForm.register("resourceId")}
+                    >
+                      <option value="">Select resource</option>
+                      {resourceList.map((resource) => (
+                        <option key={resource.id} value={resource.id}>
+                          {resource.type} • {warehouseNameMap[resource.warehouseId] ?? `Warehouse ${resource.warehouseId}`}
+                        </option>
+                      ))}
+                    </select>
+                    {updateResourceForm.formState.errors.resourceId && (
+                      <p className="mt-1 text-xs text-destructive">
+                        {updateResourceForm.formState.errors.resourceId.message}
+                      </p>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label>Type</Label>
+                      <Input disabled={disableUpdateResource} {...updateResourceForm.register("type")} />
+                    </div>
+                    <div>
+                      <Label>Quantity</Label>
+                      <Input
+                        type="number"
+                        inputMode="numeric"
+                        disabled={disableUpdateResource}
+                        {...updateResourceForm.register("quantity")}
+                      />
+                      {updateResourceForm.formState.errors.quantity && (
+                        <p className="mt-1 text-xs text-destructive">
+                          {updateResourceForm.formState.errors.quantity.message}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label>Warehouse</Label>
+                      <select
+                        className="mt-1 h-10 w-full rounded-md border px-3"
+                        disabled={disableUpdateResource}
+                        {...updateResourceForm.register("warehouseId")}
+                      >
+                        <option value="">Keep current</option>
+                        {(warehouses.data ?? []).map((warehouse) => (
+                          <option key={warehouse.id} value={warehouse.id}>
+                            {warehouse.name}
+                          </option>
+                        ))}
+                      </select>
+                      {updateResourceForm.formState.errors.warehouseId && (
+                        <p className="mt-1 text-xs text-destructive">
+                          {updateResourceForm.formState.errors.warehouseId.message}
+                        </p>
+                      )}
+                    </div>
+                    <div>
+                      <Label>Unit</Label>
+                      <Input disabled={disableUpdateResource} {...updateResourceForm.register("unit")} />
+                    </div>
+                  </div>
+                  <div>
+                    <Label>Reorder level</Label>
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      disabled={disableUpdateResource}
+                      {...updateResourceForm.register("reorderLevel")}
+                    />
+                    {updateResourceForm.formState.errors.reorderLevel && (
+                      <p className="mt-1 text-xs text-destructive">
+                        {updateResourceForm.formState.errors.reorderLevel.message}
+                      </p>
+                    )}
+                  </div>
+                  {updateResourceForm.formState.errors.root?.message && (
+                    <p className="text-xs text-destructive">{updateResourceForm.formState.errors.root.message}</p>
+                  )}
+                </fieldset>
               </form>
             </div>
           </CardContent>
@@ -1060,11 +1094,12 @@ export default function ResourcesPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <form className="space-y-3" onSubmit={submitCreateTransfer}>
+              <fieldset disabled={disableCreateTransfer} className="space-y-3">
               <div>
                 <Label>Resource</Label>
                 <select
                   className="mt-1 h-10 w-full rounded-md border px-3"
-                  disabled={isCreatingTransfer}
+                  disabled={disableCreateTransfer}
                   {...resourceTransferForm.register("resourceId")}
                 >
                   <option value="">Select resource</option>
@@ -1085,7 +1120,7 @@ export default function ResourcesPage() {
                   <Label>Destination warehouse</Label>
                   <select
                     className="mt-1 h-10 w-full rounded-md border px-3"
-                    disabled={isCreatingTransfer}
+                    disabled={disableCreateTransfer}
                     {...resourceTransferForm.register("toWarehouseId")}
                   >
                     <option value="">Select destination</option>
@@ -1106,7 +1141,7 @@ export default function ResourcesPage() {
                   <Input
                     type="number"
                     inputMode="numeric"
-                    disabled={isCreatingTransfer}
+                    disabled={disableCreateTransfer}
                     {...resourceTransferForm.register("quantity")}
                   />
                   {resourceTransferForm.formState.errors.quantity && (
@@ -1119,7 +1154,7 @@ export default function ResourcesPage() {
               <div>
                 <Label>Note</Label>
                 <Textarea
-                  disabled={isCreatingTransfer}
+                  disabled={disableCreateTransfer}
                   placeholder="Optional context for the move"
                   {...resourceTransferForm.register("note")}
                 />
@@ -1127,9 +1162,10 @@ export default function ResourcesPage() {
               {resourceTransferForm.formState.errors.root?.message && (
                 <p className="text-xs text-destructive">{resourceTransferForm.formState.errors.root.message}</p>
               )}
-              <Button type="submit" disabled={isCreatingTransfer}>
+              <Button type="submit" disabled={disableCreateTransfer}>
                 {isCreatingTransfer ? "Recording..." : "Record transfer"}
               </Button>
+              </fieldset>
             </form>
 
             <div>
@@ -1172,11 +1208,12 @@ export default function ResourcesPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <form className="space-y-3" onSubmit={submitCreateDistribution}>
+              <fieldset disabled={disableCreateDistribution} className="space-y-3">
               <div>
                 <Label>Resource</Label>
                 <select
                   className="mt-1 h-10 w-full rounded-md border px-3"
-                  disabled={isCreatingDistribution}
+                  disabled={disableCreateDistribution}
                   {...distributionForm.register("resourceId")}
                 >
                   <option value="">Select resource</option>
@@ -1203,7 +1240,7 @@ export default function ResourcesPage() {
                   <Input
                     type="number"
                     inputMode="numeric"
-                    disabled={isCreatingDistribution}
+                    disabled={disableCreateDistribution}
                     {...distributionForm.register("quantity")}
                   />
                   {distributionForm.formState.errors.quantity && (
@@ -1217,7 +1254,7 @@ export default function ResourcesPage() {
                   <Input
                     type="number"
                     inputMode="numeric"
-                    disabled={isCreatingDistribution}
+                    disabled={disableCreateDistribution}
                     {...distributionForm.register("requestId")}
                   />
                 </div>
@@ -1225,7 +1262,7 @@ export default function ResourcesPage() {
               <div>
                 <Label>Destination</Label>
                 <Input
-                  disabled={isCreatingDistribution}
+                  disabled={disableCreateDistribution}
                   {...distributionForm.register("destination")}
                 />
                 {distributionForm.formState.errors.destination && (
@@ -1237,7 +1274,7 @@ export default function ResourcesPage() {
               <div>
                 <Label>Notes</Label>
                 <Textarea
-                  disabled={isCreatingDistribution}
+                  disabled={disableCreateDistribution}
                   placeholder="Include vehicle, contact, or ETA"
                   {...distributionForm.register("notes")}
                 />
@@ -1245,9 +1282,10 @@ export default function ResourcesPage() {
               {distributionForm.formState.errors.root?.message && (
                 <p className="text-xs text-destructive">{distributionForm.formState.errors.root.message}</p>
               )}
-              <Button type="submit" disabled={isCreatingDistribution}>
+              <Button type="submit" disabled={disableCreateDistribution}>
                 {isCreatingDistribution ? "Logging..." : "Log distribution"}
               </Button>
+              </fieldset>
             </form>
 
             <div>

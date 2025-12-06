@@ -4,12 +4,13 @@ import { z } from "zod";
 import { getDb } from "../db";
 import { distributionLogs, resources } from "../db/schema";
 import { authMiddleware, rescuerOnly, type AuthRequest } from "../middleware/auth";
+import { requirePermission } from "../security/permissions";
 import { createDistributionLogSchema } from "../../shared/api";
 import { badRequest, HttpError } from "../utils/httpError";
 
 const router = Router();
 
-router.get("/", authMiddleware, rescuerOnly, async (_req, res) => {
+router.get("/", authMiddleware, requirePermission("resources:read"), async (_req, res) => {
   const db = getDb();
   const logs = await db
     .select()
@@ -19,7 +20,12 @@ router.get("/", authMiddleware, rescuerOnly, async (_req, res) => {
   res.json(logs);
 });
 
-router.post("/", authMiddleware, rescuerOnly, async (req: AuthRequest, res) => {
+router.post(
+  "/",
+  authMiddleware,
+  rescuerOnly,
+  requirePermission("distribution:write"),
+  async (req: AuthRequest, res) => {
   try {
     const payload = createDistributionLogSchema.parse(req.body);
     const db = getDb();
@@ -60,16 +66,17 @@ router.post("/", authMiddleware, rescuerOnly, async (req: AuthRequest, res) => {
       return log;
     });
 
-    res.status(201).json(createdLog);
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: "Invalid distribution payload", details: error.errors });
+      res.status(201).json(createdLog);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Invalid distribution payload", details: error.errors });
+      }
+      if (error instanceof HttpError) {
+        return res.status(error.status).json({ error: error.message });
+      }
+      res.status(500).json({ error: "Internal server error" });
     }
-    if (error instanceof HttpError) {
-      return res.status(error.status).json({ error: error.message });
-    }
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
+  },
+);
 
 export default router;

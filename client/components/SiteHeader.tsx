@@ -8,7 +8,7 @@ const ROLE_LINKS: { path: string; label: string; roles: User["role"][] }[] = [
   { path: "/user", label: "User Portal", roles: ["survivor"] },
   { path: "/rescue", label: "Rescue Portal", roles: ["rescuer"] },
   { path: "/admin", label: "Admin Portal", roles: ["admin"] },
-  { path: "/resources", label: "Resource Console", roles: ["admin"] },
+  { path: "/resources", label: "Resource Console", roles: ["admin", "rescuer", "survivor"] },
 ];
 
 const ROLE_HOME: Record<User["role"], string> = {
