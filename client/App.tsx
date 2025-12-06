@@ -9,6 +9,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
+import OfflineHydrator from "@/components/OfflineHydrator";
 
 const queryClient = new QueryClient();
 
@@ -32,6 +33,7 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <SessionAutoLogout />
+        <OfflineHydrator />
             <div className="min-h-screen flex flex-col">
           <SiteHeader />
           <main className="flex-1">

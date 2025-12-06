@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { desc, eq } from "drizzle-orm";
-import { appendTransparencyLedgerEntrySchema } from "@shared/api";
+import { appendTransparencyLedgerEntrySchema } from "../shared-api";
 import { getDb } from "../db";
 import { transparencyReports } from "../db/schema";
 import { authMiddleware, type AuthRequest } from "../middleware/auth";

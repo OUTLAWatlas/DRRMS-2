@@ -1,4 +1,4 @@
-import type { RescueRequest } from "@shared/api";
+import type { RescueRequest } from "../shared-api";
 
 export function inferResourceType(details: string) {
   const lower = details.toLowerCase();

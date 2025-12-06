@@ -1,4 +1,4 @@
-import type { GeoCriticalAsset } from "@shared/api";
+import type { GeoCriticalAsset } from "../shared-api";
 
 export const indiaCriticalAssets: GeoCriticalAsset[] = [
   {

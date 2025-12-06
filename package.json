@@ -29,13 +29,14 @@
     "typecheck": "tsc"
   },
   "dependencies": {
-    "otplib": "^12.0.1",
     "bcryptjs": "^3.0.2",
+    "dexie": "^4.2.1",
     "dotenv": "^17.2.1",
     "drizzle-orm": "^0.44.7",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
     "leaflet": "^1.9.4",
+    "otplib": "^12.0.1",
     "postgres": "^3.4.7",
     "react-leaflet": "^4.2.1",
     "zod": "^3.25.76",

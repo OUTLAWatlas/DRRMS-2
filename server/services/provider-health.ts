@@ -18,7 +18,7 @@ import type {
   ProviderHealthSnapshot,
   ProviderHealthStreamEvent,
   ProviderOnCallRoster,
-} from "@shared/api";
+} from "../shared-api";
 
 const STREAM_EVENT_NAME = "provider-health";
 const DEFAULT_INTERVAL_MS = readInterval(process.env.PROVIDER_HEALTH_REFRESH_INTERVAL_MS, 30_000);

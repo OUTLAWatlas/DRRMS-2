@@ -15,7 +15,7 @@ import type {
   PredictiveRecommendationFeedbackRequest,
   PredictiveRecommendationStatus,
   PredictiveRecommendationsResponse,
-} from "@shared/api";
+} from "../shared-api";
 
 const router = Router();
 const DEFAULT_LIMIT = 10;

@@ -165,10 +165,12 @@ export const createRescueRequestSchema = z.object({
   priority: z.enum(["low", "medium", "high"]).default("medium"),
   latitude: z.number().min(-90).max(90).optional(),
   longitude: z.number().min(-180).max(180).optional(),
+  clientRequestId: z.string().min(4).max(64).optional(),
 });
 
 export const updateRescueRequestStatusSchema = z.object({
   status: z.enum(["pending", "in_progress", "fulfilled", "cancelled"]),
+  clientRequestId: z.string().min(4).max(64).optional(),
 });
 
 // -----------------------------
@@ -198,6 +200,7 @@ export const createResourceSchema = z.object({
   warehouseId: z.number().int().positive(),
   unit: z.string().min(1).optional(),
   reorderLevel: z.number().int().nonnegative().optional(),
+  clientRequestId: z.string().min(4).max(64).optional(),
 });
 
 // For PUT /api/resources/:id
@@ -207,6 +210,7 @@ export const updateResourceSchema = z.object({
   warehouseId: z.number().int().positive().optional(),
   unit: z.string().min(1).optional(),
   reorderLevel: z.number().int().nonnegative().optional(),
+  clientRequestId: z.string().min(4).max(64).optional(),
 });
 
 export const createResourceTransferSchema = z.object({
@@ -335,9 +339,11 @@ export const createAllocationSchema = z.object({
       z.object({
         resourceId: z.number().int().positive(),
         quantity: z.number().int().positive(),
+        clientRequestId: z.string().min(4).max(64).optional(),
       }),
     )
     .min(1),
+  clientRequestId: z.string().min(4).max(64).optional(),
 });
 
 export type RegisterInput = z.infer<typeof registerSchema>;
@@ -454,6 +460,7 @@ export type RescueRequest = {
   longitude: number | null;
   createdAt: number;
   updatedAt: number;
+  version: number;
 };
 
 export type Warehouse = {
@@ -477,6 +484,7 @@ export type Resource = {
   warehouseId: number;
   createdAt: number;
   updatedAt: number;
+  version: number;
 };
 
 export type ResourceTransfer = {
@@ -515,6 +523,8 @@ export type ResourceAllocation = {
   latitude: number | null;
   longitude: number | null;
   allocatedAt: number;
+  updatedAt: number;
+  version: number;
 };
 
 export type PaginationMeta = {

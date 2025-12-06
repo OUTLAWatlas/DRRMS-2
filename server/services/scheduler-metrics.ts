@@ -4,7 +4,7 @@ import type {
   SchedulerHealthStatus,
   SchedulerName,
   SchedulersHealthResponse,
-} from "@shared/api";
+} from "../shared-api";
 import { getDb } from "../db";
 import { schedulerMetrics } from "../db/schema";
 

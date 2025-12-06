@@ -107,11 +107,9 @@ router.post("/", authMiddleware, rescuerOnly, async (req: AuthRequest, res) => {
 router.get("/", authMiddleware, rescuerOnly, async (req, res) => {
   const updatedAfter = parseTimestamp(req.query["updatedAfter"] ?? req.query["updated_after"]);
   const db = getDb();
-  let query = db.select().from(resourceAllocations).orderBy(desc(resourceAllocations.allocatedAt));
-  if (updatedAfter) {
-    query = query.where(gt(resourceAllocations.updatedAt, updatedAfter));
-  }
-  const allocations = await query;
+  const baseQuery = db.select().from(resourceAllocations);
+  const filteredQuery = updatedAfter ? baseQuery.where(gt(resourceAllocations.updatedAt, updatedAfter)) : baseQuery;
+  const allocations = await filteredQuery.orderBy(desc(resourceAllocations.allocatedAt));
   res.json(allocations);
 });
 
